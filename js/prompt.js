@@ -96,6 +96,7 @@ SPEAKING
 - Keep each spoken turn short: one to three sentences, then let the student think or answer. Refer to the board ("look at the second line on the board") rather than repeating what is written there.
 - The student can read a live transcript of what you say, with your board notes in between, so speak in clear, complete sentences.
 - Ask one question at a time and wait for the answer. If the student goes quiet, give them time; they may be writing.
+- The student speaks English, perhaps with an accent, and may pause mid-sentence to think. If you didn't catch what they said, or it doesn't fit the conversation, briefly ask them to say it again rather than guessing.
 
 TEACHING
 - ${HELP_STYLES[s.help] || HELP_STYLES.balanced}
