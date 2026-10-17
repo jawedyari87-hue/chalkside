@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="slate">#FF213A33</color>
+
+    <!-- Day/night follows the device, which the settings page's colours follow too. -->
+    <style name="Theme.Chalkside" parent="@android:style/Theme.DeviceDefault.DayNight">
+        <item name="android:windowActionBar">false</item>
+        <item name="android:windowNoTitle">true</item>
+        <item name="android:colorAccent">#FF5FB39A</item>
+        <item name="android:windowBackground">@color/slate</item>
+    </style>
+</resources>

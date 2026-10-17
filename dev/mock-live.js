@@ -6,13 +6,14 @@
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const enc = new TextEncoder();
 
-function toneBase64(seconds, freq = 220) {
+// Loud and high enough to hear through tablet speakers.
+function toneBase64(seconds, freq = 523) {
   const rate = 24000;
   const n = Math.round(seconds * rate);
   const pcm = new Int16Array(n);
   for (let i = 0; i < n; i++) {
     const env = Math.min(1, i / 600, (n - i) / 600);
-    pcm[i] = Math.round(Math.sin((2 * Math.PI * freq * i) / rate) * 2500 * env);
+    pcm[i] = Math.round(Math.sin((2 * Math.PI * freq * i) / rate) * 7000 * env);
   }
   const bytes = new Uint8Array(pcm.buffer);
   let s = '';

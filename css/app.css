@@ -599,6 +599,67 @@ dialog.sheet::backdrop { background: rgba(8, 18, 14, 0.5); }
 .chalk-btn--expand { display: inline-flex; gap: 6px; width: auto; padding: 0 12px 0 10px; }
 @keyframes notes-in { from { opacity: 0; transform: translateY(8px); } }
 
+/* ---- the Android app: a bar floating over other apps (?overlay) that opens into the notes ---- */
+/* The app sizes its window to the bar (data-ov="bubble") or to a panel (data-ov="panel").
+   The window is small, so the narrow-screen rules further down apply too. */
+.ov-bar { display: none; }
+html.is-overlay, html.is-overlay body { background: transparent; }
+/* A dark color-scheme would give the page an opaque dark canvas behind the bar's rounded corners. */
+:root.is-overlay { color-scheme: normal; }
+.is-overlay { --accent: #5fb39a; --accent-ink: #0d1a15; }
+.is-overlay .app { padding: 0; }
+.is-overlay .desk, .is-overlay .workspace, .is-overlay .notes__head, .is-overlay #endBtn, .is-overlay .voice-meter { display: none; }
+.is-overlay .ov-bar {
+  display: flex; align-items: center; gap: 8px; grid-row: 1; grid-column: 1;
+  padding: 6px 6px 6px 8px; background: var(--slate); color: var(--chalk);
+}
+.ov-bar__tools { display: flex; align-items: center; gap: 2px; margin-left: auto; flex: none; }
+.is-overlay .session { flex: none; order: 0; flex-basis: auto; justify-content: flex-start; }
+.is-overlay .live-ctl { gap: 10px; }
+.is-overlay .mic { width: 44px; height: 44px; }
+/* A fixed width, and room kept for the stop-talking button, so the window doesn't change size as the tutor talks. */
+.is-overlay .status { width: 7.8em; min-width: 0; }
+.is-overlay .status__text, .is-overlay .status__meta { overflow: hidden; text-overflow: ellipsis; }
+.is-overlay .status__meta { color: var(--chalk-dim); }
+.is-overlay .btn--start { height: 44px; box-shadow: none; }
+.is-overlay #skipBtn { width: 38px; padding: 0; border-color: var(--slate-line); color: var(--chalk); }
+.is-overlay #skipBtn[hidden] { display: inline-flex !important; visibility: hidden; }
+.is-overlay #skipBtn span { display: none; }
+.ov-btn {
+  position: relative; display: grid; place-items: center; width: 42px; height: 42px; flex: none;
+  border: 0; border-radius: 50%; background: transparent; color: var(--chalk);
+}
+.ov-btn:active { background: rgba(237, 241, 231, 0.14); }
+.ov-btn .ic { width: 22px; height: 22px; }
+.ov-eye-off, .ov-collapse { display: none; }
+#ovEye[aria-pressed="false"] { color: var(--chalk-pink); }
+#ovEye[aria-pressed="false"] .ov-eye-on, #ovExpand[aria-expanded="true"] .ov-expand { display: none; }
+#ovEye[aria-pressed="false"] .ov-eye-off, #ovExpand[aria-expanded="true"] .ov-collapse { display: block; }
+.ov-badge {
+  position: absolute; top: 0; right: -2px; min-width: 19px; height: 19px; padding: 0 5px; border-radius: 10px;
+  background: var(--chalk-yellow); color: #2b2a1e; font-size: 12px; font-weight: 700; line-height: 19px; text-align: center;
+}
+/* The bar on its own: a pill, measured by the page so the window can fit it. */
+[data-ov="bubble"] .ov-bar {
+  position: fixed; top: 6px; left: 6px; width: max-content; border-radius: 999px;
+  box-shadow: inset 0 0 0 1px rgba(237, 241, 231, 0.12), 0 2px 5px rgba(0, 0, 0, 0.4);
+}
+[data-ov="bubble"] #notesSmaller, [data-ov="bubble"] #notesBigger { display: none; }
+/* The panel: the bar on top, the notes below, in one rounded window. */
+[data-ov="panel"] .app { background: var(--slate); border-radius: 18px; overflow: hidden; }
+[data-ov="panel"] .ov-bar { padding: 8px 8px 8px 12px; border-bottom: 1px solid var(--slate-line); }
+.is-overlay .notes { grid-template-rows: minmax(0, 1fr) auto; margin: 0; border-radius: 0; box-shadow: none; animation: none; }
+.is-overlay .notes__foot { display: grid; gap: 8px; }
+.is-overlay .notes__foot .type-ask { max-width: none; margin: 0; }
+.is-overlay .asks--screen { display: flex; }
+
+/* ---- the Android app's settings screen (?overlay&settings): just the settings, full screen ---- */
+.is-app-settings .app { display: none; }
+.is-app-settings [data-page-only] { display: none !important; }
+.is-app-settings dialog.sheet { width: 100vw; max-width: none; height: 100dvh; max-height: none; margin: 0; border-radius: 0; box-shadow: none; }
+.is-app-settings dialog.sheet::backdrop { background: var(--desk-raised); }
+.is-app-settings .sheet__inner { height: 100%; max-height: none; max-width: 760px; margin: 0 auto; }
+
 /* ---- toasts ---- */
 .toasts {
   position: fixed; z-index: 60; left: 50%; transform: translateX(-50%);

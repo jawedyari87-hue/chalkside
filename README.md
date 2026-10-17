@@ -38,10 +38,14 @@ Tips:
 - Lessons save on the tablet. Open **Lessons** (top left) to name them, go back to old ones, or start a new one.
 - Tap **Expand** on the board (or the captions strip) to read everything the tutor says, word by word as it talks, with its written maths in between, full screen and in large text. **A−/A+** change the size.
 - **Reply speed** in Settings is *Quick* by default, so the tutor answers after a short pause, like Gemini Live. Choose *Patient* if it keeps cutting in while you're thinking aloud.
-- A website can't see the rest of your screen: Chrome and Samsung Internet on Android don't let websites share the screen. To show the tutor something from another app, take a screenshot and add it with the picture button.
+- A website can't see the rest of your screen: Chrome and Samsung Internet on Android don't let websites share the screen. To show the tutor something from another app, take a screenshot and add it with the picture button, or use the Android app (below).
 - The **print** button on the board saves a PDF of the board and your page for revision.
 - If the tutor keeps cutting itself off, its own voice is probably reaching the microphone. Use headphones, or tick *I'm somewhere noisy* in Settings.
 - To keep your key safe, you can restrict it to the Gemini API in [Google Cloud's credentials page](https://console.cloud.google.com/apis/credentials).
+
+## The Android app: the tutor sees your whole screen
+
+The `android` folder holds a small Android app for the Galaxy Tab. It lets the tutor see whatever is on screen: lecture PDFs, Samsung Notes, websites. It talks you through it while a floating bar, which opens into a notes panel, shows everything it says and writes. It loads this site in an overlay mode (`?overlay`), so it uses the same tutor, settings and lessons code. See [android/README.md](android/README.md) to build and install it.
 
 ## Models
 
@@ -57,4 +61,4 @@ If Google stops accepting a setting, the app retries without it and carries on. 
 py -3 -m http.server 8790
 ```
 
-Open http://localhost:8790 in Chrome. Localhost counts as secure, so the microphone works. Add `?mock` to the address (http://localhost:8790/?mock) to try a fake tutor that needs no key: it beeps instead of talking, but it writes on the board, plots graphs and marks your page. `py -3 dev/serve.py` does the same with caching turned off. The `dev/` folder holds that fake tutor, the dev server and the icon generator; the app doesn't need it, but it's harmless to upload.
+Open http://localhost:8790 in Chrome. Localhost counts as secure, so the microphone works. Add `?mock` to the address (http://localhost:8790/?mock) to try a fake tutor that needs no key: it beeps instead of talking, but it writes on the board, plots graphs and marks your page. `py -3 dev/serve.py` does the same with caching turned off. http://localhost:8790/?overlay&mock shows the Android app's floating bar, with a fake app supplying pictures of a pretend screen. The `dev/` folder holds the fake tutor, the fake app, the dev server and the icon generator; the app doesn't need it, but it's harmless to upload.

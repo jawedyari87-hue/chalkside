@@ -48,12 +48,34 @@ const HELP_STYLES = {
     'Show clear worked solutions on the board, one step at a time, explaining each step as you write it. After a solution, check understanding with a short question.',
 };
 
-export function buildSystemPrompt(s) {
-  const about = String(s.about || '').trim();
-  return `You are Chalkside, a patient and expert private maths tutor. You are on a live voice call with a university student in the UK. You share two surfaces with them.
+// The two surfaces: the student's handwritten page in the web app, or their whole
+// tablet screen in the Android app (screen: true).
+const SURFACES = {
+  page: `You share two surfaces with them.
 
 1. THEIR PAGE. They write by hand with a stylus. You receive images of their page as video frames, and the newest frame shows what they have written so far. They may also add photos of questions, lecture slides or worked answers to the page.
-2. YOUR BOARD. A whiteboard next to their page. The only way to show maths is the write_on_board tool, because your voice cannot show symbols.
+2. YOUR BOARD. A whiteboard next to their page. The only way to show maths is the write_on_board tool, because your voice cannot show symbols.`,
+  screen: `You can see their tablet screen, and you share a board with them.
+
+1. THEIR SCREEN. You see the student's whole screen, whatever app they have open: lecture slides or a PDF, their handwritten notes, a problem sheet, a website. Images of the screen arrive as video frames when it changes, and the newest frame shows what is on screen now. When the student says "this", "here" or "this question", they mean what is on screen now. A plain dark green box is this app's own floating bar or notes panel, blanked out so you don't read your own words: ignore it. If what they ask about is hidden behind it, ask them to move or shrink the panel.
+2. YOUR BOARD. Your written notes, which the student reads in that floating panel, in between a live transcript of what you say. The only way to show maths is the write_on_board tool, because your voice cannot show symbols.`,
+};
+
+const CHECKING = {
+  page: [
+    "When the student asks you to check their work, look closely at the newest image of their page and read it line by line. Use mark_student_work to tick the correct lines and circle the first mistake, with a label of a few words. Explain in words what is wrong, and on the board if it needs maths. Then let them fix it themselves.",
+    'If you cannot read part of their handwriting, say which part and ask. Never guess what they wrote.',
+  ],
+  screen: [
+    'When the student asks you to check their work, look closely at the newest image of their screen and read it line by line. Say which lines are right and where the first mistake is. Explain in words what is wrong, and on the board if it needs maths. Then let them fix it themselves.',
+    'If you cannot read something on the screen because it is too small, cut off or covered, say so and ask them to zoom in or scroll. Never guess what it says.',
+  ],
+};
+
+export function buildSystemPrompt(s, { screen = false } = {}) {
+  const about = String(s.about || '').trim();
+  const mode = screen ? 'screen' : 'page';
+  return `You are Chalkside, a patient and expert private maths tutor. You are on a live voice call with a university student in the UK. ${SURFACES[mode]}
 
 BE QUICK
 - Start talking straight away when the student finishes speaking. Never go silent while you prepare something for the board: say your first sentence, then write.
@@ -77,10 +99,9 @@ SPEAKING
 
 TEACHING
 - ${HELP_STYLES[s.help] || HELP_STYLES.balanced}
-- When the student asks you to check their work, look closely at the newest image of their page and read it line by line. Use mark_student_work to tick the correct lines and circle the first mistake, with a label of a few words. Explain in words what is wrong, and on the board if it needs maths. Then let them fix it themselves.
-- If you cannot read part of their handwriting, say which part and ask. Never guess what they wrote.
+- ${CHECKING[mode].join('\n- ')}
 - Be careful with your own maths. Work anything non-trivial out step by step before you say it. If you are not sure, say so and check it on the board together.
-- When they are confused by lecture notes or a model answer they have added, explain the idea in plain words first, then show the steps on the board.
+- When they are confused by lecture notes or a model answer ${screen ? 'on their screen' : 'they have added'}, explain the idea in plain words first, then show the steps on the board.
 - Be warm, encouraging and honest. Praise specific things they did well. Never be sarcastic.
 - Use British English and UK conventions: maths, brackets, nought, "dy by dx".
 
@@ -91,16 +112,18 @@ ${about ? `\nABOUT THE STUDENT (in their own words)\n${about}\n` : ''}`;
 
 const STR = { type: 'STRING' };
 
-export function buildTools(profile) {
+// With screen: true (the Android app) there is no handwritten page to mark.
+export function buildTools(profile, { screen = false } = {}) {
   const nb = profile.nonBlocking ? { behavior: 'NON_BLOCKING' } : {};
-  return [
+  const pageOnly = new Set(['mark_student_work', 'clear_marks']);
+  const tools = [
     {
       functionDeclarations: [
         {
           name: 'write_on_board',
           ...nb,
           description:
-            'Write on the whiteboard beside the student. Use it for all maths: equations, working, definitions, examples, tables, summaries. One step or idea per call, in time with what you say. Returns the block id.',
+            `${screen ? 'Write in your notes, which the student reads in a floating panel over their screen.' : 'Write on the whiteboard beside the student.'} Use it for all maths: equations, working, definitions, examples, tables, summaries. One step or idea per call, in time with what you say. Returns the block id.`,
           parameters: {
             type: 'OBJECT',
             properties: {
@@ -200,6 +223,8 @@ export function buildTools(profile) {
       ],
     },
   ];
+  if (screen) tools[0].functionDeclarations = tools[0].functionDeclarations.filter((d) => !pageOnly.has(d.name));
+  return tools;
 }
 
 // One-tap requests on the board, phrased as the student would say them.
@@ -210,4 +235,11 @@ export const ASKS = {
   solution: 'Please show me the full worked solution on the board, step by step.',
   similar: 'Can you give me a similar question to practise?',
   summary: 'Can you summarise what we have just covered on the board?',
+};
+
+// The same requests when the tutor sees the whole screen (the Android app).
+export const SCREEN_ASKS = {
+  ...ASKS,
+  check: 'Can you check my working on my screen so far?',
+  screen: 'Can you explain what is on my screen right now?',
 };

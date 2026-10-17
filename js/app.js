@@ -1,26 +1,39 @@
 // Chalkside: a voice maths tutor (Gemini Live) that watches your handwriting
 // and writes the maths on a chalkboard beside your page.
 
-import { $, $$, clamp, debounce, sleep, uid, prefs, bytesToBase64, base64ToBytes, fmtClock, fmtDate, toast, imageToDataUrl, escapeHtml } from './util.js';
+import { $, $$, clamp, debounce, sleep, uid, prefs, bytesToBase64, base64ToBytes, fmtClock, fmtDate, toast, imageToDataUrl, escapeHtml, cleanSpeech } from './util.js';
 import { InkPage, PEN_COLOURS, HL_COLOURS, SWATCH } from './ink.js';
 import { Board } from './board.js';
 import { AudioEngine } from './audio.js';
 import { LiveSession } from './live.js';
-import { MODELS, VOICES, modelProfile, buildSystemPrompt, buildTools, ASKS } from './prompt.js';
+import { MODELS, VOICES, modelProfile, buildSystemPrompt, buildTools, ASKS, SCREEN_ASKS } from './prompt.js';
 import { lessons } from './store.js';
 import { openPdf, renderPdfPage, showThumbnails } from './pdfimport.js';
 import { renderInline } from './math.js';
 import { NotesView } from './notes.js';
 
-const MOCK = new URLSearchParams(location.search).has('mock');
+const params = new URLSearchParams(location.search);
+const MOCK = params.has('mock');
+// The Android app shows Chalkside in a small floating window over other apps (?overlay),
+// and uses ?overlay&settings for its settings screen. Both talk to the app through
+// window.ChalksideAndroid. In the floating window the tutor sees the whole screen.
+const OVERLAY = params.has('overlay');
+const APP_SETTINGS = OVERLAY && params.has('settings');
+const SCREEN = OVERLAY && !APP_SETTINGS;
+// Straight away, so the full app never flashes up in the app's windows.
+if (SCREEN) document.documentElement.classList.add('is-overlay');
+if (APP_SETTINGS) document.documentElement.classList.add('is-app-settings');
 if (MOCK) {
   try {
     const mock = await import('../dev/mock-live.js');
     mock.installMock();
+    if (OVERLAY && !window.ChalksideAndroid) (await import('../dev/mock-native.js')).installMockNative();
   } catch {
     console.warn('[chalkside] ?mock needs the dev folder, which is not deployed here.');
   }
 }
+const droid = OVERLAY ? window.ChalksideAndroid || null : null;
+const asks = SCREEN ? SCREEN_ASKS : ASKS;
 
 // ---- settings --------------------------------------------------------------------
 
@@ -566,7 +579,9 @@ function setNotesScale(v) {
   saveSettings();
 }
 document.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape' && notes.isOpen && !document.querySelector('dialog[open]')) closeNotes();
+  if (e.key !== 'Escape' || !notes.isOpen || document.querySelector('dialog[open]')) return;
+  if (SCREEN) setOvMode('bubble');
+  else closeNotes();
 });
 
 // Board notes appear in the feed as they're written. Speech after a note starts
@@ -574,18 +589,23 @@ document.addEventListener('keydown', (e) => {
 board.addEventListener('block', (e) => {
   const { block, page, replaced } = e.detail;
   if (!replaced && S.tutorLine) {
-    capTutor.dataset.cont = S.tutorLine.text.trim().slice(-140);
+    capTutor.dataset.cont = cleanSpeech(S.tutorLine.text).trim().slice(-140);
     finishTutorLine();
   }
   notes.onBlock(block, page, replaced);
+  if (SCREEN && !replaced && ov.mode === 'bubble') {
+    ov.unseen++;
+    renderBadge();
+  }
 });
 
 // ---- dialogs: shared close buttons ---------------------------------------------------------
 
 $$('[data-close]').forEach((b) => b.addEventListener('click', () => b.closest('dialog')?.close()));
+// A tap outside a dialog closes it, except on the app's full-screen settings screen.
 $$('dialog').forEach((d) =>
   d.addEventListener('click', (e) => {
-    if (e.target === d) d.close();
+    if (e.target === d && !APP_SETTINGS) d.close();
   }),
 );
 
@@ -632,6 +652,12 @@ $('#sKeyShow').addEventListener('click', (e) => {
 });
 
 function openSettings(reason = '') {
+  if (SCREEN) {
+    // The floating window has no room for the settings form, so the app opens its settings screen.
+    if (reason) toast(reason, { ms: 6000 });
+    droid?.openSettings();
+    return;
+  }
   f.key.value = settings.apiKey;
   f.key.type = 'password';
   $('#sKeyShow').textContent = 'Show';
@@ -746,6 +772,8 @@ const S = {
   vadBelow: 0,
   micLevel: 0,
   awaitTimer: 0,
+  screenSeq: -1, // the newest picture of the screen sent to the tutor (Android app)
+  screenPaused: false,
 };
 
 const sessionActive = () => S.phase !== 'idle';
@@ -765,6 +793,9 @@ audio.addEventListener('mic-ended', () => {
     endSession({ quiet: true });
   }
 });
+
+// Whether the tutor is shown the student's page (web app) or screen (Android app) without being asked.
+const canSee = () => (SCREEN ? !S.screenPaused : settings.autoSend);
 
 function buildSetup() {
   const profile = S.profile || modelProfile(settings);
@@ -787,8 +818,8 @@ function buildSetup() {
   const setup = {
     model: `models/${profile.id}`,
     generationConfig,
-    systemInstruction: { parts: [{ text: buildSystemPrompt(settings) }] },
-    tools: buildTools(profile),
+    systemInstruction: { parts: [{ text: buildSystemPrompt(settings, { screen: SCREEN }) }] },
+    tools: buildTools(profile, { screen: SCREEN }),
     inputAudioTranscription: {},
     outputAudioTranscription: {},
     contextWindowCompression: { slidingWindow: {} },
@@ -892,16 +923,17 @@ function onOpen(resumed) {
   const ask = S.pendingAsk;
   S.pendingAsk = null;
   // With "see my page" off, the page only goes over with an explicit ask.
-  const showPage = settings.autoSend || !!ask;
+  const showPage = SCREEN ? canSee() : settings.autoSend || !!ask;
   if (showPage) sendFrame({ force: true });
   const earlier = board.isEmpty() ? '' : ` Earlier in this lesson you wrote these blocks on the board (newest last):\n${board.summary().join('\n')}\n`;
-  const pageNote = showPage
+  let pageNote = showPage
     ? " The newest image shows the student's page."
     : " The student has chosen to share their page only when they ask you to check it, so you can't see it yet.";
+  if (SCREEN) pageNote = showPage ? " The newest image shows the student's screen." : " The student has hidden their screen for now, so you can't see it.";
   setTimeout(() => {
     if (!S.live) return;
     if (ask) {
-      const said = ASKS[ask] || ask;
+      const said = asks[ask] || ask;
       sendRaw(`[The lesson has started.${earlier}${pageNote}] ${said}`);
       logYou(said);
     } else {
@@ -946,6 +978,7 @@ function setPhase(p) {
     levelLoopStop();
   } else levelLoopStart();
   updateStatus();
+  if (SCREEN) overlayPhase(p);
 }
 
 function updateStatus() {
@@ -1045,7 +1078,7 @@ function vadStep(rms) {
   if (!S.hearing && S.vadAbove >= 5 && !S.muted) {
     S.hearing = true;
     S.lastUserSpeechAt = performance.now();
-    if (S.phase === 'live' && performance.now() - S.lastFrameAt > 20000 && settings.autoSend) sendFrame({ force: true });
+    if (S.phase === 'live' && performance.now() - S.lastFrameAt > 20000 && canSee()) sendFrame({ force: true });
     updateStatus();
   } else if (S.hearing && S.vadBelow >= 20) {
     S.hearing = false;
@@ -1155,7 +1188,7 @@ function logYouSpeech(chunk) {
     transcript.push(S.youLine);
   }
   S.youLine.text += chunk;
-  capYou.textContent = `You: ${S.youLine.text.trim().slice(-160)}`;
+  capYou.textContent = `You: ${cleanSpeech(S.youLine.text).trim().slice(-160)}`;
   notes.onSpeech(S.youLine);
 }
 
@@ -1168,7 +1201,7 @@ function logTutor(chunk) {
   }
   S.tutorLine.text += chunk;
   // After a board note the caption carries on from where the sentence was.
-  capTutor.textContent = (fresh && capTutor.dataset.cont ? capTutor.dataset.cont + ' ' : '') + S.tutorLine.text.trim().slice(-220);
+  capTutor.textContent = (fresh && capTutor.dataset.cont ? capTutor.dataset.cont + ' ' : '') + cleanSpeech(S.tutorLine.text).trim().slice(-220);
   capTutor.dataset.cont = '';
   notes.onSpeech(S.tutorLine);
 }
@@ -1236,6 +1269,7 @@ function frameKey() {
 
 function sendFrame({ force = false } = {}) {
   if (S.phase !== 'live' || !S.live) return false;
+  if (SCREEN) return sendScreenFrame(force);
   if (!force && !settings.autoSend) return false;
   const key = frameKey();
   if (!force && key === S.lastFrameKey) return false;
@@ -1258,8 +1292,34 @@ function sendFrame({ force = false } = {}) {
 const frameRetry = debounce(() => sendFrame(), 1100);
 const frameSoon = debounce(() => sendFrame(), 1000, 4000);
 
+// The Android app captures the screen and only has a new picture when something on it
+// has changed. force sends the newest one again, for when the last was a while ago.
+function sendScreenFrame(force) {
+  if (!droid || S.screenPaused) return false;
+  const now = performance.now();
+  if (now - S.lastFrameAt < 900) return false; // the app makes at most one a second; this allows for timer jitter
+  let frame = null;
+  try {
+    const raw = droid.frame(force ? -1 : S.screenSeq);
+    if (raw) frame = JSON.parse(raw);
+  } catch {
+    return false;
+  }
+  if (!frame?.data) return false;
+  if (!S.live.send({ realtimeInput: { video: { data: frame.data, mimeType: 'image/jpeg' } } })) return false;
+  S.screenSeq = frame.seq;
+  S.lastFrameAt = now;
+  return true;
+}
+
 // Make sure the tutor has the current page before a question about it.
 async function freshFrame() {
+  if (SCREEN) {
+    const wait = 1000 - (performance.now() - S.lastFrameAt);
+    if (wait > 0) await sleep(wait);
+    if (sendScreenFrame(performance.now() - S.lastFrameAt > 20000)) await sleep(350);
+    return;
+  }
   const stale = frameKey() !== S.lastFrameKey || performance.now() - S.lastFrameAt > 20000;
   if (!stale) return;
   const wait = 1000 - (performance.now() - S.lastFrameAt);
@@ -1315,7 +1375,7 @@ async function ask(what) {
     return;
   }
   await freshFrame();
-  sendUserText(ASKS[what] || what);
+  sendUserText(asks[what] || what);
 }
 
 $('#checkBtn').addEventListener('click', () => ask('check'));
@@ -1333,6 +1393,144 @@ for (const [formId, inputId] of [
     input.blur();
     ask(text);
   });
+}
+
+// ---- the Android app: a floating bar over other apps that opens into the notes ---------------
+//
+// The app puts this page in a small window that floats over whatever the student is using,
+// sized to fit the bar, and sends pictures of the whole screen. Expand grows the window into
+// a panel with everything the tutor says and writes.
+
+const ovBar = $('#ovBar');
+const OV_MARGIN = 6; // room around the bar for its shadow, in CSS pixels
+const ov = { mode: 'bubble', unseen: 0, size: '', poll: 0, closing: false };
+
+function setupOverlay() {
+  document.documentElement.classList.add('is-overlay');
+  ovBar.hidden = false;
+  ovBar.prepend(sessionEl);
+  $('#ovTools').prepend($('#notesSmaller'), $('#notesBigger'));
+  $('#screenAsks').hidden = false;
+  $('#ovExpand').addEventListener('click', () => setOvMode(ov.mode === 'panel' ? 'bubble' : 'panel'));
+  $('#ovEye').addEventListener('click', toggleScreen);
+  $('#ovClose').addEventListener('click', closeOverlay);
+  new ResizeObserver(() => fitBubble()).observe(ovBar);
+  // The floating window only takes the keyboard while you type, so it doesn't steal it from other apps.
+  const input = $('#notesTypeInput');
+  input.addEventListener('pointerdown', () => droid?.setFocusable(true));
+  input.addEventListener('focus', () => droid?.setFocusable(true));
+  input.addEventListener('blur', () => droid?.setFocusable(false));
+  toast.hook = overlayToast;
+  window.chalksideNative = onNative;
+  setOvMode('bubble');
+}
+
+function setOvMode(mode) {
+  ov.mode = mode;
+  document.documentElement.dataset.ov = mode;
+  const expand = $('#ovExpand');
+  expand.setAttribute('aria-expanded', String(mode === 'panel'));
+  expand.setAttribute('aria-label', mode === 'panel' ? 'Shrink back to the small bar' : 'Show everything the tutor says and writes');
+  if (mode === 'panel') {
+    ov.unseen = 0;
+    ov.size = '';
+    renderBadge();
+    droid?.setMode('panel', 0, 0);
+    openNotes();
+  } else {
+    droid?.setFocusable(false);
+    if (notes.isOpen) closeNotes();
+    fitBubble();
+  }
+}
+
+// Tell the app how big the bar is, so the floating window fits it exactly.
+function fitBubble() {
+  if (ov.mode !== 'bubble' || ovBar.hidden) return;
+  const r = ovBar.getBoundingClientRect();
+  const w = Math.ceil(r.width) + 2 * OV_MARGIN;
+  const h = Math.ceil(r.height) + 2 * OV_MARGIN;
+  if (`${w}x${h}` === ov.size) return;
+  ov.size = `${w}x${h}`;
+  droid?.setMode('bubble', w, h);
+}
+
+function renderBadge() {
+  const badge = $('#ovBadge');
+  badge.hidden = !ov.unseen;
+  badge.textContent = ov.unseen > 9 ? '9+' : String(ov.unseen);
+}
+
+function overlayPhase(p) {
+  droid?.keepScreenOn(p !== 'idle');
+  droid?.setCapture(p !== 'idle' && !S.screenPaused);
+  // Pictures of the screen go over about once a second, but only when it has changed.
+  clearInterval(ov.poll);
+  ov.poll = p === 'live' ? setInterval(() => sendFrame(), 1000) : 0;
+  fitBubble();
+}
+
+function toggleScreen() {
+  S.screenPaused = !S.screenPaused;
+  const eye = $('#ovEye');
+  eye.setAttribute('aria-pressed', String(!S.screenPaused));
+  eye.setAttribute('aria-label', S.screenPaused ? 'Let the tutor see your screen again' : 'Hide your screen from the tutor');
+  droid?.setCapture(S.phase !== 'idle' && !S.screenPaused);
+  toast(S.screenPaused ? 'The tutor can no longer see your screen.' : 'The tutor can see your screen again.', { ms: 2500 });
+  if (!S.screenPaused) setTimeout(() => sendFrame({ force: true }), 300);
+}
+
+async function closeOverlay() {
+  if (ov.closing) return;
+  ov.closing = true;
+  if (sessionActive()) endSession({ quiet: true });
+  await saveNow();
+  droid?.stop();
+}
+
+// In the small bar there's no room for messages: errors and anything with a button open
+// the panel, and the rest show as Android toasts.
+function overlayToast(message, { kind, actionLabel }) {
+  if (ov.mode === 'panel' || !droid) return false;
+  if (kind === 'error' || actionLabel) {
+    setOvMode('panel');
+    return false;
+  }
+  droid.toast(message);
+  return true;
+}
+
+// Messages from the Android app.
+function onNative(type) {
+  if (type === 'stop') closeOverlay();
+  else if (type === 'blur') document.activeElement?.blur?.(); // you tapped another app, or Back, while typing
+  else if (type === 'screen-started') {
+    toast('The tutor can see your screen again.', { ms: 3000 });
+    setTimeout(() => sendFrame({ force: true }), 1200);
+  } else if (type === 'screen-stopped') {
+    toast("Screen sharing has stopped, so the tutor can't see your screen any more. Start a new lesson in the Chalkside app to share it again.", {
+      kind: 'error',
+      ms: 12000,
+    });
+  } else if (type === 'settings') {
+    // The app's settings screen saved new settings (it shares this page's storage).
+    const before = JSON.stringify(setupRelevant());
+    Object.assign(settings, DEFAULTS, prefs.get('settings', {}));
+    applyNotesScale();
+    if (!sessionActive()) {
+      if (settings.apiKey) startSession();
+    } else if (JSON.stringify(setupRelevant()) !== before) {
+      toast('Saved. The tutor picks up the new settings next time you start.', { actionLabel: 'Restart now', onAction: restartSession, ms: 9000 });
+    }
+  }
+}
+
+// ---- the Android app's settings screen (?overlay&settings) ------------------------------------
+
+function setupAppSettings() {
+  document.documentElement.classList.add('is-app-settings');
+  settingsDlg.addEventListener('close', () => droid?.settingsClosed(!!settings.apiKey));
+  openSettings();
 }
 
 // ---- printing ------------------------------------------------------------------------------
@@ -1385,6 +1583,10 @@ async function boot() {
   updateToolbar();
   updateWatch();
   setPhase('idle');
+  if (APP_SETTINGS) {
+    setupAppSettings();
+    return;
+  }
 
   let data = null;
   const id = prefs.get('currentLesson', null);
@@ -1395,9 +1597,11 @@ async function boot() {
       data = null;
     }
   }
-  // The welcome board stays until the first real lesson with the tutor.
-  if (data) loadLesson(data);
-  else startFreshLesson({ welcome: !prefs.get('welcomed', false) });
+  // The welcome board stays until the first real lesson with the tutor. In the Android
+  // app a lesson carries on if you come back within a couple of hours.
+  const recent = (L) => Date.now() - (L.updated || 0) < 2 * 60 * 60 * 1000;
+  if (data && (!SCREEN || recent(data))) loadLesson(data);
+  else startFreshLesson({ welcome: !SCREEN && !prefs.get('welcomed', false) });
   $('#clearMarksBtn').disabled = page.marks.length === 0;
 
   if (!window.isSecureContext) {
@@ -1405,6 +1609,11 @@ async function boot() {
   }
   if ('serviceWorker' in navigator && location.protocol === 'https:') {
     navigator.serviceWorker.register('sw.js').catch(() => {});
+  }
+  if (SCREEN) {
+    setupOverlay();
+    // You started a lesson in the app, so the tutor starts straight away.
+    startSession();
   }
 }
 

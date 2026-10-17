@@ -72,6 +72,13 @@ export const prefs = {
   },
 };
 
+// Live transcripts sometimes carry markers such as "<no speech detected>" or "{pause}".
+export function cleanSpeech(s) {
+  return String(s)
+    .replace(/<[a-z][a-z ]*>|\{[a-z]+\}/gi, '')
+    .replace(/\s{2,}/g, ' ');
+}
+
 export function escapeHtml(s) {
   return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 }
@@ -91,7 +98,9 @@ export function fmtDate(ms) {
   return d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' }) + `, ${time}`;
 }
 
+// toast.hook(message, options) can take over a message by returning true (the Android app's small bar does).
 export function toast(message, { kind = 'info', ms = 5000, actionLabel, onAction } = {}) {
+  if (toast.hook?.(message, { kind, ms, actionLabel, onAction })) return null;
   const host = document.getElementById('toasts');
   if (!host) return null;
   const el = document.createElement('div');

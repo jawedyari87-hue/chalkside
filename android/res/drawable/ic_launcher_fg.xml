@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The brand mark from index.html (a chalk square-root sign), centred in the adaptive icon's safe zone. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <group
+        android:scaleX="2.0625"
+        android:scaleY="2.0625"
+        android:translateX="21"
+        android:translateY="21">
+        <path
+            android:fillColor="#00000000"
+            android:pathData="M6.5,17.5l3,-1.6l3.6,7.6l5.4,-15.5h7.5"
+            android:strokeWidth="2.4"
+            android:strokeColor="#FFEDF1E7"
+            android:strokeLineCap="round"
+            android:strokeLineJoin="round" />
+    </group>
+</vector>

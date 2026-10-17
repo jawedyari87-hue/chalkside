@@ -151,12 +151,18 @@ function looksLikeBareLatex(s) {
 
 const TEX_FENCE = /```[ \t]*(latex|tex|math|katex)?[ \t]*\n([\s\S]*?)```/gi;
 const looksTexy = (s) => /\\[a-zA-Z]{2,}|[\^_]\{/.test(s);
+// Display maths that is already delimited, possibly over several lines.
+const DISPLAY_BLOCK = /\$\$[\s\S]+?\$\$|\\\[[\s\S]+?\\\]|\\begin\{([a-zA-Z*]+)\}[\s\S]*?\\end\{\1\}/g;
 
 // Models sometimes put maths in code blocks or forget the dollar signs, which
 // shows as raw LaTeX "code". Turn those back into maths.
 export function rescueMaths(src) {
   let s = src.replace(TEX_FENCE, (whole, lang, body) => (lang || looksLikeBareLatex(body.trim()) ? `\n$$${body.trim()}$$\n` : whole));
   s = s.replace(/`([^`\n]+)`/g, (whole, body) => (looksTexy(body) ? `$${body}$` : whole));
+  // Set aside display maths first: its lines (such as "1. \text{Base case} & ...") must not be
+  // mistaken for lines that lost their dollar signs.
+  const kept = [];
+  s = s.replace(DISPLAY_BLOCK, (block) => `\u0000${kept.push(block) - 1}\u0000`);
   return s
     .split('\n')
     .map((line) => {
@@ -172,7 +178,8 @@ export function rescueMaths(src) {
       if (m && looksLikeBareLatex(m[2])) return `${lead}${m[1]}$${m[2].trim()}$`;
       return line;
     })
-    .join('\n');
+    .join('\n')
+    .replace(/\u0000(\d+)\u0000/g, (_, n) => kept[Number(n)]);
 }
 
 function renderTex(tex, display, errors) {

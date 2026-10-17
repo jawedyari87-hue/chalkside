@@ -2,6 +2,14 @@
 // word by word) with its board notes in between, in the order they happened.
 
 import { renderInline } from './math.js';
+import { cleanSpeech } from './util.js';
+
+// Spoken words. The live transcript sometimes spells maths in LaTeX ("a symbol $a$"), so render that.
+function setSpeech(p, text) {
+  const t = cleanSpeech(text).trim();
+  if (/\$|\\\(/.test(t)) p.innerHTML = renderInline(t);
+  else p.textContent = t;
+}
 
 export class NotesView {
   constructor({ root, scroll, feed, pill, board, getTranscript }) {
@@ -70,7 +78,7 @@ export class NotesView {
     li.className = `nt nt--${entry.who === 'tutor' ? 'tutor' : 'you'}`;
     const p = document.createElement('p');
     p.className = 'nt__text';
-    p.textContent = entry.text.trim();
+    setSpeech(p, entry.text);
     li.append(p);
     this.els.set(entry, li);
     return li;
@@ -105,7 +113,7 @@ export class NotesView {
       li = this.sayEl(entry);
       this.feed.append(li);
     } else {
-      li.firstElementChild.textContent = entry.text.trim();
+      setSpeech(li.firstElementChild, entry.text);
     }
     this.after(stick);
   }
