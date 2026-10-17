@@ -44,6 +44,15 @@
             android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden|keyboard|uiMode"
             android:windowSoftInputMode="adjustResize" />
 
+        <!-- Opens Android's file picker for the floating window. Invisible, and gone once you've chosen. -->
+        <activity
+            android:name=".FilePickerActivity"
+            android:exported="false"
+            android:taskAffinity=""
+            android:excludeFromRecents="true"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden|keyboard|uiMode" />
+
         <service
             android:name=".TutorService"
             android:exported="false"

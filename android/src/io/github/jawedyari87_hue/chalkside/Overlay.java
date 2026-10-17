@@ -21,7 +21,10 @@ import android.view.WindowInsets;
 import android.view.WindowManager;
 import android.view.WindowMetrics;
 import android.view.inputmethod.InputMethodManager;
+import android.net.Uri;
 import android.webkit.JavascriptInterface;
+import android.webkit.ValueCallback;
+import android.webkit.WebChromeClient;
 import android.webkit.WebView;
 import android.widget.FrameLayout;
 import android.widget.Toast;
@@ -116,7 +119,19 @@ final class Overlay {
 
     private void createWebView() {
         root = new DragFrame(ctx);
-        web = Web.create(ctx, url, new Bridge(), view -> main.post(this::recreate));
+        web = Web.create(ctx, url, new Bridge(), new Web.Listener() {
+            @Override
+            public void onRendererGone(WebView view) {
+                main.post(Overlay.this::recreate);
+            }
+
+            // "Show the tutor a file": the page shrinks to the bar, and Android's picker opens.
+            @Override
+            public boolean onFileChooser(ValueCallback<Uri[]> callback, WebChromeClient.FileChooserParams params) {
+                FilePickerActivity.open(service, callback, params, null);
+                return true;
+            }
+        });
         web.setBackgroundColor(Color.TRANSPARENT);
         root.addView(web, new FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
         // Keep the typing box above the keyboard.

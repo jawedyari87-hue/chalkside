@@ -271,43 +271,52 @@ const pdfDlg = $('#pdfDlg');
 const pdfGrid = $('#pdfGrid');
 const pdfAdd = $('#pdfAdd');
 $('#addPdfBtn').addEventListener('click', () => pdfInput.click());
-pdfInput.addEventListener('change', async () => {
+pdfInput.addEventListener('change', () => {
   const f = pdfInput.files?.[0];
   pdfInput.value = '';
   if (!f) return;
-  $('#pdfTitle').textContent = f.name.replace(/\.pdf$/i, '');
+  choosePdfPages(f, { verb: 'Add', busy: 'Adding…', help: 'Tap the pages to add to your page. The tutor will see them too.' }, async (pdf, pages) => {
+    for (const n of pages) {
+      const c = await renderPdfPage(pdf, n, 1600);
+      page.addImage({ src: c.toDataURL('image/jpeg', 0.86), width: c.width, height: c.height });
+    }
+    toast(pages.length > 1 ? `Added ${pages.length} pages.` : 'Page added.', { ms: 3000 });
+  });
+});
+
+// Pick pages of a PDF in the page dialog, then onPick(pdf, pageNumbers). maxPages caps the choice.
+async function choosePdfPages(file, { verb, busy, help, maxPages = 0 }, onPick) {
+  $('#pdfTitle').textContent = file.name.replace(/\.pdf$/i, '');
+  $('#pdfHelp').textContent = help;
   pdfGrid.innerHTML = '<p class="help">Opening the PDF…</p>';
   pdfAdd.disabled = true;
-  pdfAdd.textContent = 'Add pages';
+  pdfAdd.textContent = `${verb} pages`;
   pdfDlg.showModal();
   let pdf;
   try {
-    pdf = await openPdf(f);
+    pdf = await openPdf(file);
   } catch (err) {
     pdfGrid.innerHTML = `<p class="help">${escapeHtml(err.message || 'That PDF could not be opened.')}</p>`;
     return;
   }
   const selected = showThumbnails(pdf, pdfGrid, (n) => {
-    pdfAdd.disabled = n === 0;
-    pdfAdd.textContent = n > 1 ? `Add ${n} pages` : 'Add page';
+    const tooMany = maxPages && n > maxPages;
+    pdfAdd.disabled = n === 0 || tooMany;
+    pdfAdd.textContent = tooMany ? `Up to ${maxPages} pages at a time` : n > 1 ? `${verb} ${n} pages` : `${verb} page`;
   });
   pdfAdd.onclick = async () => {
     const pages = selected();
     pdfAdd.disabled = true;
-    pdfAdd.textContent = 'Adding…';
+    pdfAdd.textContent = busy;
     try {
-      for (const n of pages) {
-        const c = await renderPdfPage(pdf, n, 1600);
-        page.addImage({ src: c.toDataURL('image/jpeg', 0.86), width: c.width, height: c.height });
-      }
-      toast(pages.length > 1 ? `Added ${pages.length} pages.` : 'Page added.', { ms: 3000 });
+      await onPick(pdf, pages);
     } catch (err) {
-      toast(err.message || 'That page could not be added.', { kind: 'error' });
+      toast(err.message || 'Those pages could not be used.', { kind: 'error' });
     }
     pdfDlg.close();
     pdf.destroy?.();
   };
-});
+}
 
 // ---- board controls ----------------------------------------------------------------
 
@@ -774,6 +783,7 @@ const S = {
   awaitTimer: 0,
   screenSeq: -1, // the newest picture of the screen sent to the tutor (Android app)
   screenPaused: false,
+  sharingFile: false, // pictures of a file are going to the tutor, so the screen waits
 };
 
 const sessionActive = () => S.phase !== 'idle';
@@ -1296,7 +1306,7 @@ const frameSoon = debounce(() => sendFrame(), 1000, 4000);
 // The Android app captures the screen and only has a new picture when something on it
 // has changed. force sends the newest one again, for when the last was a while ago.
 function sendScreenFrame(force) {
-  if (!droid || S.screenPaused) return false;
+  if (!droid || S.screenPaused || S.sharingFile) return false;
   const now = performance.now();
   if (now - S.lastFrameAt < 900) return false; // the app makes at most one a second; this allows for timer jitter
   let frame = null;
@@ -1313,12 +1323,13 @@ function sendScreenFrame(force) {
   return true;
 }
 
-// Make sure the tutor has the current page before a question about it.
-async function freshFrame() {
+// Make sure the tutor has the current page before a question about it. forceScreen: the
+// question is about the screen, so resend it even if a shared file was shown since.
+async function freshFrame(forceScreen = false) {
   if (SCREEN) {
     const wait = 1000 - (performance.now() - S.lastFrameAt);
     if (wait > 0) await sleep(wait);
-    if (sendScreenFrame(performance.now() - S.lastFrameAt > 20000)) await sleep(350);
+    if (sendScreenFrame(forceScreen || performance.now() - S.lastFrameAt > 20000)) await sleep(350);
     return;
   }
   const stale = frameKey() !== S.lastFrameKey || performance.now() - S.lastFrameAt > 20000;
@@ -1375,7 +1386,7 @@ async function ask(what) {
     toast('One moment, the tutor is reconnecting.', { ms: 2500 });
     return;
   }
-  await freshFrame();
+  await freshFrame(what === 'screen');
   sendUserText(asks[what] || what);
 }
 
@@ -1423,6 +1434,10 @@ function setupOverlay() {
   input.addEventListener('blur', () => droid?.setFocusable(false));
   toast.hook = overlayToast;
   window.chalksideNative = onNative;
+  $('#shareBtn').hidden = false;
+  $('#shareBtn').addEventListener('click', pickFileToShare);
+  shareInput.addEventListener('change', onShareFile);
+  shareInput.addEventListener('cancel', reopenAfterPick);
   setOvMode('bubble');
 }
 
@@ -1524,6 +1539,77 @@ function onNative(type) {
       toast('Saved. The tutor picks up the new settings next time you start.', { actionLabel: 'Restart now', onAction: restartSession, ms: 9000 });
     }
   }
+}
+
+// ---- showing the tutor a file: pages of a PDF, or a picture (Android app) ----------------------
+
+const shareInput = $('#shareInput');
+let reopenPanel = false;
+
+// The panel shrinks to the bar while Android's file picker is open, and opens again afterwards.
+function pickFileToShare() {
+  if (!sessionActive()) {
+    toast('Start the tutor first, then show it a file.', { ms: 4000 });
+    return;
+  }
+  reopenPanel = ov.mode === 'panel';
+  setOvMode('bubble');
+  shareInput.click();
+}
+
+function reopenAfterPick() {
+  if (reopenPanel && ov.mode !== 'panel') setOvMode('panel');
+  reopenPanel = false;
+}
+
+async function onShareFile() {
+  const file = shareInput.files?.[0];
+  shareInput.value = '';
+  reopenAfterPick();
+  if (!file) return;
+  const name = file.name || 'a file';
+  try {
+    if (/pdf$/i.test(file.type) || /\.pdf$/i.test(name)) {
+      if (ov.mode !== 'panel') setOvMode('panel'); // the page chooser needs the room
+      const opts = { verb: 'Show', busy: 'Sending…', help: 'Tap the pages to show the tutor.', maxPages: 6 };
+      choosePdfPages(file, opts, async (pdf, pages) => {
+        const images = [];
+        for (const n of pages) images.push((await renderPdfPage(pdf, n, 1400)).toDataURL('image/jpeg', 0.85).split(',')[1]);
+        await shareWithTutor(images, `${name} (${pages.length > 1 ? `pages ${pages.join(', ')}` : `page ${pages[0]}`})`);
+      });
+    } else if (/^image\//i.test(file.type) || /\.(png|jpe?g|webp|gif|bmp)$/i.test(name)) {
+      const img = await imageToDataUrl(file, 1600, 0.85);
+      await shareWithTutor([img.src.split(',')[1]], name);
+    } else {
+      toast('Choose a PDF or a picture.', { ms: 4000 });
+    }
+  } catch (err) {
+    toast(err.message || "That file couldn't be opened.", { kind: 'error' });
+  }
+}
+
+// Pictures of the file go to the tutor the same way as the screen, then a note saying what
+// they are, so it doesn't take them for the screen.
+async function shareWithTutor(images, label) {
+  if (S.phase !== 'live' || !S.live) {
+    toast('The tutor is not connected. Start it, then show it the file again.', { kind: 'error' });
+    return;
+  }
+  S.sharingFile = true;
+  try {
+    for (const data of images) {
+      const wait = 1000 - (performance.now() - S.lastFrameAt);
+      if (wait > 0) await sleep(wait);
+      if (!S.live?.send({ realtimeInput: { video: { data, mimeType: 'image/jpeg' } } })) throw new Error('The tutor disconnected while the file was being sent.');
+      S.lastFrameAt = performance.now();
+    }
+  } finally {
+    S.sharingFile = false;
+  }
+  const which = images.length > 1 ? `the last ${images.length} images show it` : 'the newest image shows it';
+  sendRaw(`[The student has shared a file, ${label}: ${which}, not their screen. Look at it closely.] Can you take a look at this?`);
+  logYou(`Shared ${label}`);
+  setAwaiting();
 }
 
 // ---- the Android app's settings screen (?overlay&settings) ------------------------------------

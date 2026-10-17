@@ -42,6 +42,7 @@ After **Start lesson** the app gets out of the way and the tutor greets you. Ope
 - **The floating bar** has the microphone (tap to mute), the tutor's status, an **eye** (tap to hide your screen from the tutor, for example before you open messages or banking), **expand**, and **✕** to end the lesson. Drag the bar to move it.
 - **Expand** opens the notes panel: everything the tutor says, live, with its written maths in between. **A−/A+** change the text size. The chips ask for a hint, a check of your working, an explanation of your screen, and so on. You can also type to the tutor. Drag the panel by its top bar, and tap the shrink button to go back to the small bar. A yellow number on the expand button counts new notes since you last looked.
 - **Ask about what's on screen**: "what does this line mean?", "check my working", "is this step right?". The tutor sees the newest picture of your screen, including your handwriting in Samsung Notes or Notein.
+- **Show the tutor a file** with the paperclip next to the typing box: pick a PDF and choose up to 6 pages, or pick a picture. The tutor gets those pages as pictures, marked as a file rather than your screen, and talks you through them.
 - **Volume buttons** change the tutor's volume during a lesson. While the microphone is on, Android treats the lesson like a call, so the app routes the buttons to the tutor's voice.
 - **End the lesson** with ✕ on the bar, **End lesson** in the notification, or **End lesson** in the app. The lesson is saved. If you start again within two hours it carries on where you left off.
 
@@ -84,6 +85,7 @@ Add `?mock` (`--base "http://localhost:8791/?mock"`) for the fake tutor, which n
 | `src/.../ScreenCapture.java` | Mirrors the screen into an `ImageReader`, at most one JPEG a second, only when something changed, with Chalkside's own window blanked out |
 | `src/.../Overlay.java` | The floating window: the web app's `?overlay` page in a WebView, sized by the page, draggable, and the `window.ChalksideAndroid` bridge |
 | `src/.../SettingsActivity.java` | The web app's settings form (`?overlay&settings`) |
+| `src/.../FilePickerActivity.java` | Opens Android's file picker for the floating window's paperclip, which can't open one itself |
 | `src/.../Web.java` | WebView set-up shared by both: storage, microphone, links open in the browser |
 | `build.py` | The build |
 

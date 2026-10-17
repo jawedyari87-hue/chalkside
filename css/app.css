@@ -653,6 +653,7 @@ html.is-overlay, html.is-overlay body { background: transparent; }
 .is-overlay .notes { grid-template-rows: minmax(0, 1fr) auto; margin: 0; border-radius: 0; box-shadow: none; animation: none; }
 .is-overlay .notes__foot { display: grid; gap: 8px; }
 .is-overlay .notes__foot .type-ask { max-width: none; margin: 0; }
+.btn--attach { background: transparent; border-color: rgba(237, 241, 231, 0.24); color: var(--chalk); }
 .is-overlay .asks--screen { display: flex; }
 
 /* ---- the Android app's settings screen (?overlay&settings): just the settings, full screen ---- */

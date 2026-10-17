@@ -32,6 +32,7 @@
   <symbol id="i-undo" viewBox="0 0 24 24"><path d="M9 14L4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/></symbol>
   <symbol id="i-redo" viewBox="0 0 24 24"><path d="M15 14l5-5-5-5"/><path d="M20 9H9.5a5.5 5.5 0 0 0 0 11H13"/></symbol>
   <symbol id="i-image" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="2"/><path d="M21 16l-5-5-9 9"/></symbol>
+  <symbol id="i-clip" viewBox="0 0 24 24"><path d="M20.5 11.5l-8.2 8.2a5 5 0 0 1-7.1-7.1l8.6-8.6a3.4 3.4 0 0 1 4.8 4.8l-8.6 8.6a1.8 1.8 0 0 1-2.5-2.5l7.9-7.9"/></symbol>
   <symbol id="i-pdf" viewBox="0 0 24 24"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M9 13h6M9 17h4"/></symbol>
   <symbol id="i-unmark" viewBox="0 0 24 24"><path d="M3.5 12.5l3.5 3.5 7-8.5"/><path d="M15 15l5 5M20 15l-5 5"/></symbol>
   <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/></symbol>
@@ -212,6 +213,7 @@
         <button type="button" class="ask-chip" data-ask="summary">Summarise</button>
       </div>
       <form class="type-ask" id="notesTypeForm" autocomplete="off">
+        <button type="button" class="btn btn--sm btn--attach" id="shareBtn" aria-label="Show the tutor a file: pages of a PDF, or a picture" hidden><svg class="ic"><use href="#i-clip"/></svg></button>
         <input id="notesTypeInput" type="text" placeholder="Type to the tutor…" aria-label="Type a message to the tutor" enterkeyhint="send">
         <button type="submit" class="btn btn--chalk btn--sm" aria-label="Send"><svg class="ic"><use href="#i-send"/></svg></button>
       </form>
@@ -318,7 +320,7 @@
       <button type="button" class="icon-btn" data-close aria-label="Close"><svg class="ic"><use href="#i-x"/></svg></button>
     </header>
     <div class="sheet__body">
-      <p class="help">Tap the pages to add to your page. The tutor will see them too.</p>
+      <p class="help" id="pdfHelp">Tap the pages to add to your page. The tutor will see them too.</p>
       <div class="pdf-grid" id="pdfGrid"></div>
     </div>
     <footer class="sheet__foot">
@@ -330,6 +332,7 @@
 
 <input type="file" id="imageInput" accept="image/*" hidden>
 <input type="file" id="pdfInput" accept="application/pdf,.pdf" hidden>
+<input type="file" id="shareInput" accept="image/*,application/pdf,.pdf" hidden>
 <div class="toasts" id="toasts" aria-live="polite"></div>
 <div class="print-sheet" id="printSheet"></div>
 </body>

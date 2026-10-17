@@ -10,6 +10,7 @@ import android.util.Log;
 import android.webkit.ConsoleMessage;
 import android.webkit.PermissionRequest;
 import android.webkit.RenderProcessGoneDetail;
+import android.webkit.ValueCallback;
 import android.webkit.WebChromeClient;
 import android.webkit.WebResourceError;
 import android.webkit.WebResourceRequest;
@@ -25,6 +26,11 @@ final class Web {
     interface Listener {
         /** The page's renderer crashed or was killed, so this WebView can't be used again. */
         void onRendererGone(WebView view);
+
+        /** A file input was tapped. Return true and call back (null if cancelled), or false for no picker. */
+        default boolean onFileChooser(ValueCallback<Uri[]> callback, WebChromeClient.FileChooserParams params) {
+            return false;
+        }
     }
 
     private Web() {}
@@ -88,6 +94,11 @@ final class Web {
                     }
                 }
                 req.deny();
+            }
+
+            @Override
+            public boolean onShowFileChooser(WebView view, ValueCallback<Uri[]> callback, FileChooserParams params) {
+                return listener.onFileChooser(callback, params);
             }
 
             @Override
