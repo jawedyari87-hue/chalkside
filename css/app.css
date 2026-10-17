@@ -583,6 +583,8 @@ dialog.sheet::backdrop { background: rgba(8, 18, 14, 0.5); }
   font-size: calc(17px * var(--notes-scale));
   line-height: 1.55;
 }
+/* Room below the newest exchange, so it can scroll up to the top of the view. */
+.notes__feed::after { content: ""; flex: none; height: 70vh; }
 .nt { min-width: 0; }
 .nt__text { margin: 0; overflow-wrap: anywhere; }
 .nt--tutor .nt__text { font-size: 1.22em; line-height: 1.5; }

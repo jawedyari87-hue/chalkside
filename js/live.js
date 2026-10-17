@@ -45,6 +45,7 @@ export function isAuthFailure(err) {
 const OPTIONAL_FIELDS = [
   'mediaResolution', 'thinkingConfig', 'behavior', 'scheduling', 'realtimeInputConfig',
   'contextWindowCompression', 'inputAudioTranscription', 'outputAudioTranscription', 'speechConfig',
+  'languageCodes',
 ];
 
 const decoder = new TextDecoder();
@@ -93,7 +94,7 @@ const isInvalidArgument = (err) => err?.code === 1007 || /invalid argument|INVAL
 
 // When the server says "invalid argument" without naming a field, drop the
 // newest optional settings one at a time, most likely culprit first.
-const BLIND_STRIP_ORDER = ['mediaResolution', 'thinkingConfig', 'behavior', 'realtimeInputConfig', 'contextWindowCompression', 'outputAudioTranscription', 'inputAudioTranscription'];
+const BLIND_STRIP_ORDER = ['languageCodes', 'mediaResolution', 'thinkingConfig', 'behavior', 'realtimeInputConfig', 'contextWindowCompression', 'outputAudioTranscription', 'inputAudioTranscription'];
 
 function hasField(obj, field) {
   if (Array.isArray(obj)) return obj.some((v) => hasField(v, field));

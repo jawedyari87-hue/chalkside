@@ -1,8 +1,15 @@
 // The expanded view: one big, readable feed of everything the tutor says (live,
 // word by word) with its board notes in between, in the order they happened.
+//
+// Each new exchange scrolls up to the top of the view, with empty space below it for what
+// comes next, so earlier notes don't crowd the screen. While the tutor talks and writes, the
+// view follows its newest line, unless you've scrolled back to read something.
 
 import { renderInline } from './math.js';
 import { cleanSpeech } from './util.js';
+
+// After this long without anything new, the tutor speaking up starts a new exchange.
+const NEW_TURN_GAP = 8000;
 
 // Spoken words. The live transcript sometimes spells maths in LaTeX ("a symbol $a$"), so render that.
 function setSpeech(p, text) {
@@ -21,14 +28,28 @@ export class NotesView {
     this.getTranscript = getTranscript;
     this.els = new WeakMap(); // transcript entry -> its <li>
     this.lastPageId = null;
-    pill.addEventListener('click', () => this.toEnd(true));
+    this.turnStart = null; // the <li> the current exchange starts with
+    this.lastAt = 0;
+    this.follow = true;
+    this.byHand = false;
+    pill.addEventListener('click', () => {
+      this.follow = true;
+      this.showLatest(true);
+    });
+    // Scrolling by hand stops the view following along, until the newest line is back in view.
+    const touched = () => (this.byHand = true);
+    scroll.addEventListener('wheel', touched, { passive: true });
+    scroll.addEventListener('touchmove', touched, { passive: true });
     scroll.addEventListener(
       'scroll',
       () => {
-        if (this.nearBottom()) pill.hidden = true;
+        if (!this.byHand) return;
+        this.follow = this.latestVisible();
+        if (this.follow) pill.hidden = true;
       },
       { passive: true },
     );
+    scroll.addEventListener('scrollend', () => (this.byHand = false));
   }
 
   get isOpen() {
@@ -38,7 +59,8 @@ export class NotesView {
   open() {
     this.root.hidden = false;
     this.renderAll();
-    this.toEnd(false);
+    this.follow = true;
+    this.showLatest(false);
   }
 
   close() {
@@ -71,6 +93,9 @@ export class NotesView {
       else frag.append(...this.blockEls(it.block, it.page, false));
     }
     this.feed.replaceChildren(frag);
+    // The latest exchange starts with the last thing you said.
+    const lis = [...this.feed.children];
+    this.turnStart = lis.findLast((li) => li.classList.contains('nt--you')) || lis.at(-1) || null;
   }
 
   sayEl(entry) {
@@ -106,22 +131,28 @@ export class NotesView {
   // A tutor or student line was created or grew.
   onSpeech(entry) {
     if (!this.isOpen) return;
-    const stick = this.nearBottom();
     this.feed.querySelector('.nt--empty')?.remove();
+    const now = Date.now();
     let li = this.els.get(entry);
     if (!li) {
       li = this.sayEl(entry);
       this.feed.append(li);
+      // Anything you say starts a new exchange; so does the tutor speaking up after a quiet spell.
+      if (entry.who !== 'tutor' || now - this.lastAt > NEW_TURN_GAP || !this.turnStart?.isConnected) {
+        this.turnStart = li;
+        this.follow = true;
+      }
     } else {
       setSpeech(li.firstElementChild, entry.text);
     }
-    this.after(stick);
+    this.lastAt = now;
+    this.update();
   }
 
   onBlock(block, page, replaced) {
     if (!this.isOpen) return;
-    const stick = this.nearBottom();
     this.feed.querySelector('.nt--empty')?.remove();
+    this.lastAt = Date.now();
     if (replaced) {
       const old = this.feed.querySelector(`.nt--block[data-id="${block.id}"]`);
       if (old) {
@@ -130,24 +161,39 @@ export class NotesView {
       }
     }
     this.feed.append(...this.blockEls(block, page, true));
-    this.after(stick);
+    this.update();
   }
 
-  after(stick) {
-    if (stick) this.toEnd(true);
+  update() {
+    if (this.follow) this.showLatest(true);
     else this.pill.hidden = false;
   }
 
-  nearBottom() {
-    const s = this.scroll;
-    return s.scrollHeight - s.scrollTop - s.clientHeight < 160;
+  // Where an element sits in the scrolled content.
+  offset(el) {
+    return el.getBoundingClientRect().top - this.scroll.getBoundingClientRect().top + this.scroll.scrollTop;
   }
 
-  toEnd(smooth) {
+  // The current exchange at the top of the view, with empty space below it; once it is
+  // taller than the view, its newest lines.
+  showLatest(smooth) {
     this.pill.hidden = true;
+    requestAnimationFrame(() => {
+      const last = this.feed.lastElementChild;
+      if (!last) return;
+      const start = this.turnStart?.isConnected ? this.turnStart : last;
+      const s = this.scroll;
+      const bottom = this.offset(last) + last.offsetHeight + 24;
+      const top = Math.max(0, Math.max(this.offset(start) - 12, bottom - s.clientHeight));
+      if (Math.abs(top - s.scrollTop) < 2) return;
+      s.scrollTo({ top, behavior: smooth && !matchMedia('(prefers-reduced-motion: reduce)').matches ? 'smooth' : 'auto' });
+    });
+  }
+
+  latestVisible() {
+    const last = this.feed.lastElementChild;
+    if (!last) return true;
     const s = this.scroll;
-    requestAnimationFrame(() =>
-      s.scrollTo({ top: s.scrollHeight, behavior: smooth && !matchMedia('(prefers-reduced-motion: reduce)').matches ? 'smooth' : 'auto' }),
-    );
+    return this.offset(last) + last.offsetHeight <= s.scrollTop + s.clientHeight + 40;
   }
 }

@@ -820,7 +820,8 @@ function buildSetup() {
     generationConfig,
     systemInstruction: { parts: [{ text: buildSystemPrompt(settings, { screen: SCREEN }) }] },
     tools: buildTools(profile, { screen: SCREEN }),
-    inputAudioTranscription: {},
+    // Left to guess, the transcript of what you say sometimes comes out in another language.
+    inputAudioTranscription: { languageCodes: ['en-GB'] },
     outputAudioTranscription: {},
     contextWindowCompression: { slidingWindow: {} },
   };
