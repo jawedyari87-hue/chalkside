@@ -8,6 +8,8 @@ A website can't do this. Chrome and Samsung Internet on Android don't let pages 
 
 You need the APK file, `android/build/chalkside.apk`. Build it with `py -3 android/build.py` (see *Build it yourself* below).
 
+**Samsung Auto Blocker** (Settings → Security and privacy → Auto Blocker) blocks installing apps from outside the Play Store and switches off developer options. If it is on, or keeps turning itself back on, turn it off while you install. Once the app is installed you can turn it on again, and Chalkside keeps working.
+
 **With adb, over USB or Wi-Fi (easiest to update):**
 
 1. On the tablet, open **Settings → About tablet → Software information** and tap **Build number** seven times.
