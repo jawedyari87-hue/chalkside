@@ -36,7 +36,10 @@ Tips:
 - **Check my work** sends the tutor your page and asks it to mark it. **Watch my working** (top bar) lets the tutor speak up when it spots a mistake as you write.
 - Add a question or lecture slide with the **picture** or **PDF** buttons, then ask about it.
 - Lessons save on the tablet. Open **Lessons** (top left) to name them, go back to old ones, or start a new one.
-- Tap the captions strip to read the whole transcript. The **print** button on the board saves a PDF of the board and your page for revision.
+- Tap **Expand** on the board (or the captions strip) to read everything the tutor says, word by word as it talks, with its written maths in between, full screen and in large text. **A−/A+** change the size.
+- **Reply speed** in Settings is *Quick* by default, so the tutor answers after a short pause, like Gemini Live. Choose *Patient* if it keeps cutting in while you're thinking aloud.
+- A website can't see the rest of your screen: Chrome and Samsung Internet on Android don't let websites share the screen. To show the tutor something from another app, take a screenshot and add it with the picture button.
+- The **print** button on the board saves a PDF of the board and your page for revision.
 - If the tutor keeps cutting itself off, its own voice is probably reaching the microphone. Use headphones, or tick *I'm somewhere noisy* in Settings.
 - To keep your key safe, you can restrict it to the Gemini API in [Google Cloud's credentials page](https://console.cloud.google.com/apis/credentials).
 

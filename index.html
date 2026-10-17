@@ -46,6 +46,8 @@
   <symbol id="i-x" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></symbol>
   <symbol id="i-left" viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></symbol>
   <symbol id="i-right" viewBox="0 0 24 24"><path d="M9 5l7 7-7 7"/></symbol>
+  <symbol id="i-expand" viewBox="0 0 24 24"><path d="M14 4h6v6M10 20H4v-6M20 4l-7 7M4 20l7-7"/></symbol>
+  <symbol id="i-collapse" viewBox="0 0 24 24"><path d="M4 14h6v6M20 10h-6V4M14 10l7-7M3 21l7-7"/></symbol>
 </svg>
 
 <div class="app" id="app" data-layout="board-left">
@@ -105,6 +107,7 @@
           <button type="button" class="chalk-btn" id="textBigger" aria-label="Larger board writing">A+</button>
           <button type="button" class="chalk-btn chalk-btn--icon" id="newBoardPage" aria-label="New board page"><svg class="ic"><use href="#i-plus"/></svg></button>
           <button type="button" class="chalk-btn chalk-btn--icon" id="printBtn" aria-label="Print or save as PDF"><svg class="ic"><use href="#i-print"/></svg></button>
+          <button type="button" class="chalk-btn chalk-btn--expand" id="expandBtn" aria-label="Expand: show everything the tutor says and writes, full screen"><svg class="ic"><use href="#i-expand"/></svg><span>Expand</span></button>
         </div>
       </header>
       <div class="board-body">
@@ -114,7 +117,7 @@
         <button type="button" class="new-pill" id="newPill" hidden>New on the board</button>
       </div>
       <footer class="board-foot">
-        <button type="button" class="captions" id="captions" aria-label="Show the full transcript">
+        <button type="button" class="captions" id="captions" aria-label="Expand everything the tutor has said and written">
           <span class="captions__line captions__line--you" id="capYou"></span>
           <span class="captions__line captions__line--tutor" id="capTutor">What the tutor says appears here as captions.</span>
         </button>
@@ -169,6 +172,29 @@
       <button type="button" class="check-fab" id="checkBtn"><svg class="ic"><use href="#i-check"/></svg><span>Check my work</span></button>
     </section>
   </main>
+
+  <section class="notes" id="notesView" hidden aria-labelledby="notesTitle">
+    <header class="notes__head">
+      <h2 class="notes__title" id="notesTitle">What the tutor says</h2>
+      <div class="notes__tools">
+        <button type="button" class="chalk-btn" id="notesSmaller" aria-label="Smaller writing">A−</button>
+        <button type="button" class="chalk-btn" id="notesBigger" aria-label="Larger writing">A+</button>
+        <button type="button" class="btn btn--chalk btn--sm" id="notesClose"><svg class="ic"><use href="#i-collapse"/></svg><span>Back to my page</span></button>
+      </div>
+    </header>
+    <div class="notes__body">
+      <div class="notes__scroll" id="notesScroll">
+        <ol class="notes__feed" id="notesFeed"></ol>
+      </div>
+      <button type="button" class="new-pill" id="notesPill" hidden>Jump to the latest</button>
+    </div>
+    <footer class="notes__foot">
+      <form class="type-ask" id="notesTypeForm" autocomplete="off">
+        <input id="notesTypeInput" type="text" placeholder="Type to the tutor…" aria-label="Type a message to the tutor" enterkeyhint="send">
+        <button type="submit" class="btn btn--chalk btn--sm" aria-label="Send"><svg class="ic"><use href="#i-send"/></svg></button>
+      </form>
+    </footer>
+  </section>
 </div>
 
 <dialog class="sheet" id="settingsDlg" aria-labelledby="settingsTitle">
@@ -215,7 +241,13 @@
       </section>
       <section class="field-group">
         <h3>Listening and seeing</h3>
-        <label class="check"><input type="checkbox" id="sThinkTime"> Give me time to think before the tutor replies</label>
+        <label class="field"><span>Reply speed</span>
+          <select id="sReplySpeed">
+            <option value="quick">Quick, like Gemini Live (replies after a short pause)</option>
+            <option value="normal">Normal</option>
+            <option value="patient">Patient (waits longer while you think aloud)</option>
+          </select>
+        </label>
         <label class="check"><input type="checkbox" id="sNoisy"> I'm somewhere noisy, so background sound shouldn't interrupt the tutor</label>
         <label class="check"><input type="checkbox" id="sAutoSend"> Let the tutor see my page as I write. When this is off, it only sees your page when you tap Check my work, a board button, or type a question.</label>
       </section>
@@ -271,16 +303,6 @@
       <button type="button" class="btn btn--ghost" data-close>Cancel</button>
       <button type="button" class="btn btn--primary" id="pdfAdd" disabled>Add pages</button>
     </footer>
-  </div>
-</dialog>
-
-<dialog class="sheet" id="transcriptDlg" aria-labelledby="transcriptTitle">
-  <div class="sheet__inner">
-    <header class="sheet__head">
-      <h2 id="transcriptTitle">Transcript</h2>
-      <button type="button" class="icon-btn" data-close aria-label="Close"><svg class="ic"><use href="#i-x"/></svg></button>
-    </header>
-    <div class="sheet__body"><ol class="transcript" id="transcriptList"></ol></div>
   </div>
 </dialog>
 

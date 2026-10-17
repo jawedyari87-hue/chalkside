@@ -104,9 +104,9 @@ export class Board extends EventTarget {
     const cur = this.current;
     if (!cur.sample) return;
     if (this.data.pages.length === 1) {
-      this.data.pages = [{ id: this.data.nextPageId++, title: '', blocks: [] }];
+      this.data.pages = [{ id: this.data.nextPageId++, title: '', blocks: [], t: Date.now() }];
     } else {
-      this.data.pages.push({ id: this.data.nextPageId++, title: '', blocks: [] });
+      this.data.pages.push({ id: this.data.nextPageId++, title: '', blocks: [], t: Date.now() });
     }
     this.view = this.lastIndex;
     this.render();
@@ -121,9 +121,11 @@ export class Board extends EventTarget {
     if (rid) {
       const found = this.find(rid);
       if (found && found.block.kind !== 'graph') {
-        Object.assign(found.block, { content, kind, title, edited: true, t: Date.now() });
+        // Keep the original time so the block stays in its place in the notes feed.
+        Object.assign(found.block, { content, kind, title, edited: true });
         const { errors } = renderRich(content);
         if (found.pageIndex === this.view) this.rerender(found.block);
+        this.announce(found.block, this.data.pages[found.pageIndex], true);
         this.changed();
         return { id: rid, replaced: true, errors };
       }
@@ -132,8 +134,13 @@ export class Board extends EventTarget {
     const block = { id: this.data.nextId++, kind, title, content, t: Date.now() };
     this.current.blocks.push(block);
     const errors = this.appendLatest(block);
+    this.announce(block, this.current, false);
     this.changed();
     return { id: block.id, errors };
+  }
+
+  announce(block, page, replaced) {
+    this.dispatchEvent(new CustomEvent('block', { detail: { block, page, replaced } }));
   }
 
   plot(spec = {}) {
@@ -155,6 +162,7 @@ export class Board extends EventTarget {
     const block = { id: this.data.nextId++, kind: 'graph', title: clean.title, spec: clean, t: Date.now() };
     this.current.blocks.push(block);
     this.appendLatest(block);
+    this.announce(block, this.current, false);
     this.changed();
     return { id: block.id, errors };
   }
@@ -168,7 +176,7 @@ export class Board extends EventTarget {
     } else if (!cur.blocks.length) {
       cur.title = t;
     } else {
-      this.data.pages.push({ id: this.data.nextPageId++, title: t, blocks: [] });
+      this.data.pages.push({ id: this.data.nextPageId++, title: t, blocks: [], t: Date.now() });
     }
     this.view = this.lastIndex;
     this.hidePill();

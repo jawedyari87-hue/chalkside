@@ -101,7 +101,8 @@ export class AudioEngine extends EventTarget {
     });
     this.src = this.ctx.createMediaStreamSource(this.stream);
     this.node = new AudioWorkletNode(this.ctx, 'pcm16-capture', {
-      processorOptions: { targetRate: 16000, chunk: 1280 },
+      // 40 ms chunks: smaller pieces reach Gemini sooner, so it notices you've stopped talking sooner.
+      processorOptions: { targetRate: 16000, chunk: 640 },
       numberOfInputs: 1,
       numberOfOutputs: 1,
       outputChannelCount: [1],
@@ -142,7 +143,7 @@ export class AudioEngine extends EventTarget {
     src.buffer = buf;
     src.connect(this.out);
     const now = this.ctx.currentTime;
-    if (this.playHead < now + 0.02) this.playHead = now + 0.08;
+    if (this.playHead < now + 0.02) this.playHead = now + 0.05;
     src.start(this.playHead);
     this.playHead += buf.duration;
     const wasIdle = this.sources.size === 0;

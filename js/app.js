@@ -10,6 +10,7 @@ import { MODELS, VOICES, modelProfile, buildSystemPrompt, buildTools, ASKS } fro
 import { lessons } from './store.js';
 import { openPdf, renderPdfPage, showThumbnails } from './pdfimport.js';
 import { renderInline } from './math.js';
+import { NotesView } from './notes.js';
 
 const MOCK = new URLSearchParams(location.search).has('mock');
 if (MOCK) {
@@ -31,7 +32,7 @@ const DEFAULTS = {
   voice: 'Kore',
   help: 'balanced',
   about: '',
-  thinkTime: true,
+  replySpeed: 'quick',
   noisy: false,
   autoSend: true,
   watch: true,
@@ -40,11 +41,21 @@ const DEFAULTS = {
   finger: 'auto',
   theme: 'system',
   boardScale: 1,
+  notesScale: 1.15,
   split: 0.45,
   splitV: 0.42,
+  version: 2,
 };
-const settings = { ...DEFAULTS, ...prefs.get('settings', {}) };
+const savedSettings = prefs.get('settings', {});
+const settings = { ...DEFAULTS, ...savedSettings };
 const saveSettings = () => prefs.set('settings', settings);
+// Version 1 waited 1.5 s of silence before replying ("time to think"), which felt slow.
+// Saved settings from then have no replySpeed, so they pick up the quick default.
+if ((savedSettings.version || 1) < 2) {
+  delete settings.thinkTime;
+  settings.version = 2;
+  saveSettings();
+}
 
 // ---- elements --------------------------------------------------------------------
 
@@ -357,7 +368,7 @@ function loadLesson(L) {
   board.load(L.board);
   transcript = Array.isArray(L.transcript) ? L.transcript : [];
   renderLessonTitle();
-  renderTranscript();
+  if (notes.isOpen) notes.renderAll();
   prefs.set('currentLesson', lesson.id);
 }
 
@@ -367,7 +378,7 @@ function startFreshLesson({ welcome = false } = {}) {
   board.load(welcome ? welcomeBoard() : null);
   transcript = [];
   renderLessonTitle();
-  renderTranscript();
+  if (notes.isOpen) notes.renderAll();
   prefs.set('currentLesson', lesson.id);
 }
 
@@ -515,31 +526,59 @@ $('#newLessonBtn').addEventListener('click', async () => {
   toast('New lesson. Your last one is saved under Lessons.', { ms: 3500 });
 });
 
-// ---- transcript -------------------------------------------------------------------------
+// ---- expanded view: everything the tutor says and writes ---------------------------------------
 
-const transcriptDlg = $('#transcriptDlg');
-const transcriptList = $('#transcriptList');
-$('#captions').addEventListener('click', () => {
-  renderTranscript();
-  transcriptDlg.showModal();
-  transcriptList.lastElementChild?.scrollIntoView({ block: 'end' });
+const notesView = $('#notesView');
+const notes = new NotesView({
+  root: notesView,
+  scroll: $('#notesScroll'),
+  feed: $('#notesFeed'),
+  pill: $('#notesPill'),
+  board,
+  getTranscript: () => transcript,
 });
 
-function renderTranscript() {
-  if (!transcript.length) {
-    transcriptList.innerHTML = '<li class="help">Nothing said yet.</li>';
-    return;
-  }
-  transcriptList.replaceChildren(
-    ...transcript.slice(-300).map((t) => {
-      const li = document.createElement('li');
-      li.className = t.who === 'tutor' ? 'tutor' : 'you';
-      li.innerHTML = `<span class="who">${t.who === 'tutor' ? 'Tutor' : 'You'}</span><span class="said"></span>`;
-      li.lastElementChild.textContent = t.text.trim();
-      return li;
-    }),
-  );
+function applyNotesScale() {
+  notesView.style.setProperty('--notes-scale', String(settings.notesScale));
 }
+
+function openNotes() {
+  applyNotesScale();
+  notes.open();
+  app.classList.add('is-notes');
+  $('#notesClose').focus({ preventScroll: true });
+}
+
+function closeNotes() {
+  notes.close();
+  app.classList.remove('is-notes');
+  $('#expandBtn').focus({ preventScroll: true });
+}
+
+$('#expandBtn').addEventListener('click', openNotes);
+$('#captions').addEventListener('click', openNotes);
+$('#notesClose').addEventListener('click', closeNotes);
+$('#notesSmaller').addEventListener('click', () => setNotesScale(settings.notesScale - 0.1));
+$('#notesBigger').addEventListener('click', () => setNotesScale(settings.notesScale + 0.1));
+function setNotesScale(v) {
+  settings.notesScale = Math.round(clamp(v, 0.8, 2) * 10) / 10;
+  applyNotesScale();
+  saveSettings();
+}
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && notes.isOpen && !document.querySelector('dialog[open]')) closeNotes();
+});
+
+// Board notes appear in the feed as they're written. Speech after a note starts
+// a new line, so the feed reads in the order things happened.
+board.addEventListener('block', (e) => {
+  const { block, page, replaced } = e.detail;
+  if (!replaced && S.tutorLine) {
+    capTutor.dataset.cont = S.tutorLine.text.trim().slice(-140);
+    finishTutorLine();
+  }
+  notes.onBlock(block, page, replaced);
+});
 
 // ---- dialogs: shared close buttons ---------------------------------------------------------
 
@@ -561,7 +600,7 @@ const f = {
   think: $('#sThink'),
   voice: $('#sVoice'),
   about: $('#sAbout'),
-  thinkTime: $('#sThinkTime'),
+  replySpeed: $('#sReplySpeed'),
   noisy: $('#sNoisy'),
   autoSend: $('#sAutoSend'),
   layout: $('#sLayout'),
@@ -601,7 +640,7 @@ function openSettings(reason = '') {
   f.think.value = settings.thinkingLevel;
   f.voice.value = settings.voice;
   f.about.value = settings.about;
-  f.thinkTime.checked = settings.thinkTime;
+  f.replySpeed.value = settings.replySpeed;
   f.noisy.checked = settings.noisy;
   f.autoSend.checked = settings.autoSend;
   f.layout.value = settings.layout;
@@ -634,7 +673,7 @@ settingsForm.addEventListener('submit', (e) => {
   settings.thinkingLevel = f.think.value;
   settings.voice = f.voice.value;
   settings.about = f.about.value.trim().slice(0, 1500);
-  settings.thinkTime = f.thinkTime.checked;
+  settings.replySpeed = f.replySpeed.value;
   settings.noisy = f.noisy.checked;
   settings.autoSend = f.autoSend.checked;
   settings.layout = f.layout.value;
@@ -657,8 +696,8 @@ settingsForm.addEventListener('submit', (e) => {
 });
 
 function setupRelevant() {
-  const { apiKey, model, customModel, thinkingLevel, voice, help, about, thinkTime, noisy } = settings;
-  return { apiKey, model, customModel, thinkingLevel, voice, help, about, thinkTime, noisy };
+  const { apiKey, model, customModel, thinkingLevel, voice, help, about, replySpeed, noisy } = settings;
+  return { apiKey, model, customModel, thinkingLevel, voice, help, about, replySpeed, noisy };
 }
 
 // ---- watch my working ------------------------------------------------------------------------
@@ -735,9 +774,13 @@ function buildSetup() {
     mediaResolution: 'MEDIA_RESOLUTION_HIGH',
   };
   if (profile.thinking) generationConfig.thinkingConfig = { thinkingLevel: settings.thinkingLevel };
+  // How long a pause ends your turn. Google suggests 500-800 ms; Gemini's own app feels like the low end.
   const vad = {};
   if (settings.noisy) vad.startOfSpeechSensitivity = 'START_SENSITIVITY_LOW';
-  if (settings.thinkTime) {
+  if (settings.replySpeed === 'quick') {
+    vad.endOfSpeechSensitivity = 'END_SENSITIVITY_HIGH';
+    vad.silenceDurationMs = 500;
+  } else if (settings.replySpeed === 'patient') {
     vad.endOfSpeechSensitivity = 'END_SENSITIVITY_LOW';
     vad.silenceDurationMs = 1500;
   }
@@ -998,12 +1041,13 @@ function vadStep(rms) {
     S.vadBelow++;
     S.vadAbove = 0;
   }
-  if (!S.hearing && S.vadAbove >= 3 && !S.muted) {
+  // Chunks are 40 ms: about 0.2 s of sound starts "hearing", 0.8 s of quiet ends it.
+  if (!S.hearing && S.vadAbove >= 5 && !S.muted) {
     S.hearing = true;
     S.lastUserSpeechAt = performance.now();
     if (S.phase === 'live' && performance.now() - S.lastFrameAt > 20000 && settings.autoSend) sendFrame({ force: true });
     updateStatus();
-  } else if (S.hearing && S.vadBelow >= 10) {
+  } else if (S.hearing && S.vadBelow >= 20) {
     S.hearing = false;
     S.lastUserSpeechAt = performance.now();
     updateStatus();
@@ -1098,8 +1142,10 @@ function sendUserText(text) {
 
 function logYou(text) {
   S.youLine = null;
-  transcript.push({ who: 'you', text, t: Date.now() });
+  const entry = { who: 'you', text, t: Date.now() };
+  transcript.push(entry);
   capYou.textContent = `You: ${text}`;
+  notes.onSpeech(entry);
   saveSoon();
 }
 
@@ -1110,16 +1156,21 @@ function logYouSpeech(chunk) {
   }
   S.youLine.text += chunk;
   capYou.textContent = `You: ${S.youLine.text.trim().slice(-160)}`;
+  notes.onSpeech(S.youLine);
 }
 
 function logTutor(chunk) {
   S.youLine = null;
-  if (!S.tutorLine) {
+  const fresh = !S.tutorLine;
+  if (fresh) {
     S.tutorLine = { who: 'tutor', text: '', t: Date.now() };
     transcript.push(S.tutorLine);
   }
   S.tutorLine.text += chunk;
-  capTutor.textContent = S.tutorLine.text.trim().slice(-220);
+  // After a board note the caption carries on from where the sentence was.
+  capTutor.textContent = (fresh && capTutor.dataset.cont ? capTutor.dataset.cont + ' ' : '') + S.tutorLine.text.trim().slice(-220);
+  capTutor.dataset.cont = '';
+  notes.onSpeech(S.tutorLine);
 }
 
 function finishTutorLine() {
@@ -1269,15 +1320,20 @@ async function ask(what) {
 
 $('#checkBtn').addEventListener('click', () => ask('check'));
 $$('[data-ask]').forEach((b) => b.addEventListener('click', () => ask(b.dataset.ask)));
-$('#typeForm').addEventListener('submit', (e) => {
-  e.preventDefault();
-  const input = $('#typeInput');
-  const text = input.value.trim();
-  if (!text) return;
-  input.value = '';
-  input.blur();
-  ask(text);
-});
+for (const [formId, inputId] of [
+  ['#typeForm', '#typeInput'],
+  ['#notesTypeForm', '#notesTypeInput'],
+]) {
+  $(formId).addEventListener('submit', (e) => {
+    e.preventDefault();
+    const input = $(inputId);
+    const text = input.value.trim();
+    if (!text) return;
+    input.value = '';
+    input.blur();
+    ask(text);
+  });
+}
 
 // ---- printing ------------------------------------------------------------------------------
 

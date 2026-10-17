@@ -149,6 +149,32 @@ function looksLikeBareLatex(s) {
   return cmds >= 1 && words === 0;
 }
 
+const TEX_FENCE = /```[ \t]*(latex|tex|math|katex)?[ \t]*\n([\s\S]*?)```/gi;
+const looksTexy = (s) => /\\[a-zA-Z]{2,}|[\^_]\{/.test(s);
+
+// Models sometimes put maths in code blocks or forget the dollar signs, which
+// shows as raw LaTeX "code". Turn those back into maths.
+export function rescueMaths(src) {
+  let s = src.replace(TEX_FENCE, (whole, lang, body) => (lang || looksLikeBareLatex(body.trim()) ? `\n$$${body.trim()}$$\n` : whole));
+  s = s.replace(/`([^`\n]+)`/g, (whole, body) => (looksTexy(body) ? `$${body}$` : whole));
+  return s
+    .split('\n')
+    .map((line) => {
+      if (!looksTexy(line) || /\$|\\\(|\\\[|```/.test(line)) return line;
+      // Table rows: fix each cell on its own.
+      if (/^\s*\|/.test(line)) return line.split('|').map((cell) => (looksTexy(cell) ? ` $${cell.trim()}$ ` : cell)).join('|');
+      // Keep list bullets, numbers and headings outside the maths.
+      const lead = /^(?:\s*(?:[-*+>]|\d+\.)\s+|\s*#{1,6}\s+)?/.exec(line)[0];
+      const rest = line.slice(lead.length);
+      if (looksLikeBareLatex(rest)) return lead ? `${lead}$${rest.trim()}$` : `$$${rest.trim()}$$`;
+      // "Prose: formula" or "Prose = formula" with the formula left bare.
+      const m = /^(.*?(?::|=|—|–| -)\s+)(.+)$/.exec(rest);
+      if (m && looksLikeBareLatex(m[2])) return `${lead}${m[1]}$${m[2].trim()}$`;
+      return line;
+    })
+    .join('\n');
+}
+
 function renderTex(tex, display, errors) {
   const k = window.katex;
   const clean = repairInsideMath(tex).trim();
@@ -192,6 +218,7 @@ export function renderRich(src, { inline = false } = {}) {
   const errors = [];
   let text = repairLatex(src).replace(/\r\n?/g, '\n');
   if (!inline && looksLikeBareLatex(text)) text = `$$${text}$$`;
+  else text = rescueMaths(text);
   const parts = splitMath(text);
   const maths = [];
   let md = '';
