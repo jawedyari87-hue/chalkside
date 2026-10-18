@@ -10,6 +10,7 @@ import android.content.Intent;
 import android.content.pm.ServiceInfo;
 import android.graphics.drawable.Icon;
 import android.media.AudioAttributes;
+import android.media.AudioManager;
 import android.media.projection.MediaProjection;
 import android.media.projection.MediaProjectionManager;
 import android.media.session.MediaSession;
@@ -64,6 +65,10 @@ public class TutorService extends Service {
             s.setPlaybackState(new PlaybackState.Builder().setState(PlaybackState.STATE_PLAYING, 0, 1f).build());
             s.setActive(true);
             volumeKeys = s;
+            // With media volume at nought the tutor talks but nothing comes out.
+            if (getSystemService(AudioManager.class).getStreamVolume(AudioManager.STREAM_MUSIC) == 0) {
+                toast("Your media volume is off. Press volume up to hear the tutor.");
+            }
         } else if (!live && volumeKeys != null) {
             volumeKeys.setActive(false);
             volumeKeys.release();
