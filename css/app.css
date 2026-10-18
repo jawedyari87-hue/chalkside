@@ -333,6 +333,14 @@ button:disabled { cursor: default; }
 .plot-key { display: inline-flex; align-items: center; gap: 8px; }
 .plot-key i { display: inline-block; width: 20px; height: 3px; border-radius: 2px; }
 
+/* A picture from Wikipedia, with its credit. */
+.blk--picture { max-width: 640px; }
+.blk__pic { margin: 0; }
+.blk__pic img { display: block; max-width: 100%; max-height: 420px; border-radius: 8px; background: #ffffff; }
+.blk__pic figcaption { margin-top: 6px; font-size: 0.8em; color: var(--chalk-dim); }
+.blk__pic a { color: var(--chalk-blue); }
+.blk__pending { margin: 0; font-family: var(--font-hand); color: var(--chalk-dim); animation: breathe 1.4s ease-in-out infinite; }
+
 .blk.is-new { animation: chalk-in 0.75s ease-out both; }
 .blk--your_turn.is-new { animation: note-in 0.5s cubic-bezier(0.2, 0.9, 0.3, 1.2) both; }
 @keyframes chalk-in { from { clip-path: inset(0 100% 0 0); } to { clip-path: inset(0 0 0 0); } }
@@ -595,6 +603,10 @@ dialog.sheet::backdrop { background: rgba(8, 18, 14, 0.5); }
 .nt--block .katex { font-size: 1.12em; }
 .nt--block .katex-display { margin: 0.35em 0; overflow-x: auto; overflow-y: hidden; }
 .nt--page h3 { margin: 12px 0 0; padding-bottom: 4px; border-bottom: 1px dashed var(--slate-line); font-family: var(--font-hand); font-size: 1.3em; font-weight: 700; color: var(--chalk-yellow); }
+.nt--sources { font-size: 0.82em; color: var(--chalk-dim); }
+.nt__sources { margin: 0; overflow-wrap: anywhere; }
+.nt__sources a { color: var(--chalk-blue); }
+.nt__search { display: block; width: 100%; height: 64px; margin-top: 6px; border: 0; border-radius: 8px; background: #ffffff; }
 .nt--empty { padding: 48px 0; text-align: center; font-family: var(--font-hand); font-size: 1.15em; color: var(--chalk-dim); }
 .notes__foot { padding: 8px 12px 12px; border-top: 1px solid var(--slate-line); background: rgba(0, 0, 0, 0.1); }
 .notes__foot .type-ask { max-width: 46em; margin: 0 auto; }

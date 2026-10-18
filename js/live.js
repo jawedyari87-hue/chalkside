@@ -45,7 +45,7 @@ export function isAuthFailure(err) {
 const OPTIONAL_FIELDS = [
   'mediaResolution', 'thinkingConfig', 'behavior', 'scheduling', 'realtimeInputConfig',
   'contextWindowCompression', 'inputAudioTranscription', 'outputAudioTranscription', 'speechConfig',
-  'languageCodes',
+  'languageCodes', 'googleSearch',
 ];
 
 const decoder = new TextDecoder();
@@ -72,9 +72,12 @@ export function rejectedField(reason) {
   return null;
 }
 
+const isEmptyObject = (v) => v && typeof v === 'object' && !Array.isArray(v) && !Object.keys(v).length;
+
 export function stripFields(obj, fields) {
   if (!fields.size) return obj;
-  if (Array.isArray(obj)) return obj.map((v) => stripFields(v, fields));
+  // A list item left empty by stripping (a { googleSearch: {} } tool) goes too.
+  if (Array.isArray(obj)) return obj.map((v) => stripFields(v, fields)).filter((v, i) => !isEmptyObject(v) || isEmptyObject(obj[i]));
   if (obj && typeof obj === 'object') {
     const out = {};
     for (const [k, v] of Object.entries(obj)) if (!fields.has(k)) out[k] = stripFields(v, fields);
@@ -94,7 +97,7 @@ const isInvalidArgument = (err) => err?.code === 1007 || /invalid argument|INVAL
 
 // When the server says "invalid argument" without naming a field, drop the
 // newest optional settings one at a time, most likely culprit first.
-const BLIND_STRIP_ORDER = ['languageCodes', 'mediaResolution', 'thinkingConfig', 'behavior', 'realtimeInputConfig', 'contextWindowCompression', 'outputAudioTranscription', 'inputAudioTranscription'];
+const BLIND_STRIP_ORDER = ['languageCodes', 'googleSearch', 'mediaResolution', 'thinkingConfig', 'behavior', 'realtimeInputConfig', 'contextWindowCompression', 'outputAudioTranscription', 'inputAudioTranscription'];
 
 function hasField(obj, field) {
   if (Array.isArray(obj)) return obj.some((v) => hasField(v, field));

@@ -72,6 +72,13 @@ const CHECKING = {
   ],
 };
 
+// Pictures and web lookups, when the student allows them (settings.web).
+const WEB_RULES = `
+PICTURES AND THE WEB
+- show_picture puts the main picture of a Wikipedia article into your notes and also sends it to you, so you can talk about it. Use it when a picture explains something better than words: a well-known diagram, figure or graph. For maths you can write or plot, use the board instead.
+- You can look things up with Google Search, to check a fact, a definition or a detail you are not sure of. Say briefly where you found it. Keep to what helps the student's studies, and never look up or show anything unsuitable for a study session.
+`;
+
 export function buildSystemPrompt(s, { screen = false } = {}) {
   const about = String(s.about || '').trim();
   const mode = screen ? 'screen' : 'page';
@@ -105,7 +112,7 @@ TEACHING
 - When they are confused by lecture notes or a model answer ${screen ? 'on their screen' : 'they have added'}, explain the idea in plain words first, then show the steps on the board.
 - Be warm, encouraging and honest. Praise specific things they did well. Never be sarcastic.
 - Use British English and UK conventions: maths, brackets, nought, "dy by dx".
-
+${s.web === false ? '' : WEB_RULES}
 MESSAGES FROM THE APP
 - Text in [square brackets] comes from the app, not the student. Follow it quietly and never read it out.
 ${about ? `\nABOUT THE STUDENT (in their own words)\n${about}\n` : ''}`;
@@ -114,7 +121,8 @@ ${about ? `\nABOUT THE STUDENT (in their own words)\n${about}\n` : ''}`;
 const STR = { type: 'STRING' };
 
 // With screen: true (the Android app) the tutor marks the student's screen instead of their page.
-export function buildTools(profile, { screen = false } = {}) {
+// With web: true it can also show Wikipedia pictures and use Google Search.
+export function buildTools(profile, { screen = false, web = false } = {}) {
   const nb = profile.nonBlocking ? { behavior: 'NON_BLOCKING' } : {};
   const where = screen ? 'screen' : 'page';
   const tools = [
@@ -223,6 +231,23 @@ export function buildTools(profile, { screen = false } = {}) {
       ],
     },
   ];
+  if (web) {
+    tools[0].functionDeclarations.push({
+      name: 'show_picture',
+      ...nb,
+      description:
+        "Put the main picture of a Wikipedia article into your notes, with its credit, for a well-known diagram, figure or graph. The picture is also sent to you as the newest image. Returns the article's title, or an error if no free picture was found.",
+      parameters: {
+        type: 'OBJECT',
+        properties: {
+          query: { ...STR, description: 'The Wikipedia article to take the picture from, e.g. "Binary search tree" or "Unit circle".' },
+          caption: { ...STR, description: 'Optional short heading to show above it.' },
+        },
+        required: ['query'],
+      },
+    });
+    tools.push({ googleSearch: {} });
+  }
   return tools;
 }
 

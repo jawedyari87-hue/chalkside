@@ -15,6 +15,7 @@ const KIND_LABELS = {
   summary: 'Summary',
   note: '',
   graph: 'Graph',
+  picture: 'Picture',
 };
 
 const KIND_ALIASES = {
@@ -29,7 +30,7 @@ const KIND_ALIASES = {
 
 function normKind(k) {
   const s = String(k || 'note').toLowerCase().trim();
-  if (s in KIND_LABELS && s !== 'graph') return s;
+  if (s in KIND_LABELS && s !== 'graph' && s !== 'picture') return s;
   return KIND_ALIASES[s] || KIND_ALIASES[s.replace(/[_-]+/g, ' ')] || 'note';
 }
 
@@ -94,7 +95,9 @@ export class Board extends EventTarget {
   summary(maxBlocks = 14) {
     const blocks = this.data.pages.filter((p) => !p.sample).flatMap((p) => p.blocks.map((b) => ({ ...b, page: p.title })));
     return blocks.slice(-maxBlocks).map((b) => {
-      const what = b.kind === 'graph' ? `graph of ${(b.spec?.functions || []).map((f) => f.expr).join(', ')}` : plainText(b.content, 300);
+      let what = plainText(b.content, 300);
+      if (b.kind === 'graph') what = `graph of ${(b.spec?.functions || []).map((f) => f.expr).join(', ')}`;
+      if (b.kind === 'picture') what = `picture of ${b.pic?.title || b.query} from Wikipedia`;
       return `#${b.id} ${b.kind}${b.title ? ` "${b.title}"` : ''}: ${what}`;
     });
   }
@@ -120,7 +123,7 @@ export class Board extends EventTarget {
     const rid = Number(args.replace_id);
     if (rid) {
       const found = this.find(rid);
-      if (found && found.block.kind !== 'graph') {
+      if (found && found.block.kind !== 'graph' && found.block.kind !== 'picture') {
         // Keep the original time so the block stays in its place in the notes feed.
         Object.assign(found.block, { content, kind, title, edited: true });
         const { errors } = renderRich(content);
@@ -165,6 +168,38 @@ export class Board extends EventTarget {
     this.announce(block, this.current, false);
     this.changed();
     return { id: block.id, errors };
+  }
+
+  // A picture from Wikipedia: in place straight away ("Finding a picture…"), filled in by setPicture.
+  addPicture(query, caption = '') {
+    this.leaveSample();
+    const title = repairLatex(String(caption ?? '')).trim().slice(0, 120);
+    const block = { id: this.data.nextId++, kind: 'picture', title, query: String(query).slice(0, 120), pic: null, t: Date.now() };
+    this.current.blocks.push(block);
+    this.appendLatest(block);
+    this.announce(block, this.current, false);
+    this.changed();
+    return block;
+  }
+
+  setPicture(id, pic) {
+    const found = this.find(id);
+    if (!found) return;
+    found.block.pic = pic;
+    if (found.pageIndex === this.view) this.rerender(found.block);
+    this.announce(found.block, this.data.pages[found.pageIndex], true);
+    this.changed();
+  }
+
+  // Take a block away again (a picture that couldn't be found).
+  removeBlock(id) {
+    const found = this.find(id);
+    if (!found) return;
+    const page = this.data.pages[found.pageIndex];
+    page.blocks = page.blocks.filter((b) => b.id !== id);
+    if (found.pageIndex === this.view) this.render();
+    this.dispatchEvent(new CustomEvent('removed', { detail: { id } }));
+    this.changed();
   }
 
   newPage(title) {
@@ -232,7 +267,19 @@ export class Board extends EventTarget {
       head = '<header class="blk__head"><span class="blk__edited">corrected</span></header>';
     }
     let body;
-    if (block.kind === 'graph') {
+    if (block.kind === 'picture') {
+      const p = block.pic;
+      if (!p) {
+        body = `<p class="blk__pending">Finding a picture of ${escapeHtml(block.query)}…</p>`;
+      } else {
+        const credit = [p.artist, p.licence].filter(Boolean).join(', ');
+        body =
+          `<figure class="blk__pic"><img src="${escapeHtml(p.src)}" alt="${escapeHtml(p.title)}">` +
+          `<figcaption>${p.description ? `${escapeHtml(p.description)}. ` : ''}` +
+          `<a href="${escapeHtml(p.page)}" target="_blank" rel="noopener noreferrer">${escapeHtml(p.title)} on Wikipedia</a>` +
+          `${credit ? ` · <a href="${escapeHtml(p.file)}" target="_blank" rel="noopener noreferrer">Image: ${escapeHtml(credit)}</a>` : ''}</figcaption></figure>`;
+      }
+    } else if (block.kind === 'graph') {
       const r = plotSVG(block.spec);
       errors = r.errors;
       const legend = r.legend.length

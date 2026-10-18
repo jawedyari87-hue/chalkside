@@ -11,6 +11,7 @@ import { lessons } from './store.js';
 import { openPdf, renderPdfPage, showThumbnails } from './pdfimport.js';
 import { renderInline } from './math.js';
 import { NotesView } from './notes.js';
+import { findPicture, pictureForTutor } from './pictures.js';
 
 const params = new URLSearchParams(location.search);
 const MOCK = params.has('mock');
@@ -47,6 +48,7 @@ const DEFAULTS = {
   about: '',
   replySpeed: 'quick',
   noisy: false,
+  web: true, // Google Search, and pictures from Wikipedia
   autoSend: true,
   watch: true,
   layout: 'board-left',
@@ -408,7 +410,7 @@ function lessonIsEmpty() {
 }
 
 function previewText() {
-  const last = board.allBlocks().filter((b) => b.kind !== 'graph').at(-1);
+  const last = board.allBlocks().filter((b) => b.kind !== 'graph' && b.kind !== 'picture').at(-1);
   return last ? String(last.content).replace(/\s+/g, ' ').slice(0, 120) : '';
 }
 
@@ -606,6 +608,7 @@ board.addEventListener('block', (e) => {
     renderBadge();
   }
 });
+board.addEventListener('removed', (e) => notes.onRemoved(e.detail.id));
 
 // ---- dialogs: shared close buttons ---------------------------------------------------------
 
@@ -630,6 +633,7 @@ const f = {
   about: $('#sAbout'),
   replySpeed: $('#sReplySpeed'),
   noisy: $('#sNoisy'),
+  web: $('#sWeb'),
   autoSend: $('#sAutoSend'),
   layout: $('#sLayout'),
   grid: $('#sGrid'),
@@ -676,6 +680,7 @@ function openSettings(reason = '') {
   f.about.value = settings.about;
   f.replySpeed.value = settings.replySpeed;
   f.noisy.checked = settings.noisy;
+  f.web.checked = settings.web;
   f.autoSend.checked = settings.autoSend;
   f.layout.value = settings.layout;
   f.grid.value = settings.grid;
@@ -709,6 +714,7 @@ settingsForm.addEventListener('submit', (e) => {
   settings.about = f.about.value.trim().slice(0, 1500);
   settings.replySpeed = f.replySpeed.value;
   settings.noisy = f.noisy.checked;
+  settings.web = f.web.checked;
   settings.autoSend = f.autoSend.checked;
   settings.layout = f.layout.value;
   settings.grid = f.grid.value;
@@ -730,8 +736,8 @@ settingsForm.addEventListener('submit', (e) => {
 });
 
 function setupRelevant() {
-  const { apiKey, model, customModel, thinkingLevel, voice, help, about, replySpeed, noisy } = settings;
-  return { apiKey, model, customModel, thinkingLevel, voice, help, about, replySpeed, noisy };
+  const { apiKey, model, customModel, thinkingLevel, voice, help, about, replySpeed, noisy, web } = settings;
+  return { apiKey, model, customModel, thinkingLevel, voice, help, about, replySpeed, noisy, web };
 }
 
 // ---- watch my working ------------------------------------------------------------------------
@@ -784,6 +790,7 @@ const S = {
   screenPaused: false,
   sharingFile: false, // pictures of a file are going to the tutor, so the screen waits
   lastImage: '', // what the tutor saw last: 'screen' or a shared 'file' (Android app)
+  sources: null, // this answer's line of web sources in the notes
 };
 
 const sessionActive = () => S.phase !== 'idle';
@@ -829,7 +836,7 @@ function buildSetup() {
     model: `models/${profile.id}`,
     generationConfig,
     systemInstruction: { parts: [{ text: buildSystemPrompt(settings, { screen: SCREEN }) }] },
-    tools: buildTools(profile, { screen: SCREEN }),
+    tools: buildTools(profile, { screen: SCREEN, web: settings.web }),
     // Left to guess, the transcript of what you say sometimes comes out in another language.
     inputAudioTranscription: { languageCodes: ['en-GB'] },
     outputAudioTranscription: {},
@@ -1146,9 +1153,11 @@ function onServer(msg, conn) {
       clearAwaiting();
       if (!S.dropAudio) logTutor(sc.outputTranscription.text);
     }
+    if (sc.groundingMetadata) addSources(sc.groundingMetadata);
     if (sc.turnComplete) {
       finishTutorLine();
       S.dropAudio = false;
+      S.sources = null; // the next answer gets its own sources line
       clearAwaiting();
     }
   }
@@ -1254,28 +1263,99 @@ const TOOLS = {
     page.clearMarks();
     return { ok: true };
   },
+  // A picture from Wikipedia: its place in the notes is kept while it's found.
+  async show_picture(a) {
+    if (!settings.web) return { ok: false, error: 'The student has turned off pictures from the web.' };
+    const query = String(a.query ?? '').trim();
+    if (!query) throw new Error('query was empty');
+    const block = board.addPicture(query, a.caption);
+    let pic;
+    try {
+      pic = await findPicture(query);
+    } catch (err) {
+      board.removeBlock(block.id);
+      return { ok: false, error: `Wikipedia couldn't be reached (${err.message}). Describe it in words, or draw it on the board.` };
+    }
+    if (!pic) {
+      board.removeBlock(block.id);
+      return { ok: false, error: `Wikipedia has no free picture for "${query}". Try the exact title of a Wikipedia article, or plot or describe it instead.` };
+    }
+    board.setPicture(block.id, pic);
+    // Show the tutor what the student now sees.
+    let seen = false;
+    try {
+      seen = await sendPicture(await pictureForTutor(pic.src));
+      if (!SCREEN) S.lastFrameKey = ''; // send the page again before asking about it
+    } catch {
+      // The notes still have it.
+    }
+    return {
+      ok: true,
+      id: block.id,
+      shown: pic.title,
+      description: pic.description,
+      note: seen ? "It is in the student's notes, and it is the newest image you have been sent." : "It is in the student's notes.",
+    };
+  },
 };
 
+// Most tools answer at once, all together. Slow ones (fetching a picture) answer on their own when done.
 function handleToolCalls(calls, conn) {
   const profile = S.profile || modelProfile(settings);
-  const functionResponses = calls.map((fc) => {
-    let response;
-    let failed = false;
-    try {
-      const fn = TOOLS[fc.name];
-      if (!fn) throw new Error(`there is no tool called ${fc.name}`);
-      response = fn(fc.args || {});
-      failed = response.ok === false || !!response.latex_errors || !!response.errors;
-    } catch (err) {
-      response = { ok: false, error: String(err?.message || err) };
-      failed = true;
-    }
+  const reply = (fc, response, failed) => {
     const r = { id: fc.id, name: fc.name, response };
     if (profile.scheduling && !S.live?.stripped.has('scheduling')) r.scheduling = failed ? 'WHEN_IDLE' : 'SILENT';
     return r;
-  });
-  const target = conn && !conn.closed ? conn : S.live;
-  target?.send({ toolResponse: { functionResponses } });
+  };
+  const send = (functionResponses) => {
+    if (!functionResponses.length) return;
+    const target = conn && !conn.closed ? conn : S.live;
+    target?.send({ toolResponse: { functionResponses } });
+  };
+  const failure = (fc, err) => reply(fc, { ok: false, error: String(err?.message || err) }, true);
+  const now = [];
+  for (const fc of calls) {
+    let result;
+    try {
+      const fn = TOOLS[fc.name];
+      if (!fn) throw new Error(`there is no tool called ${fc.name}`);
+      result = fn(fc.args || {});
+    } catch (err) {
+      now.push(failure(fc, err));
+      continue;
+    }
+    if (typeof result?.then === 'function') {
+      result.then(
+        (response) => send([reply(fc, response, response.ok === false)]),
+        (err) => send([failure(fc, err)]),
+      );
+    } else {
+      now.push(reply(fc, result, result.ok === false || !!result.latex_errors || !!result.errors));
+    }
+  }
+  send(now);
+}
+
+// Web pages Google Search used for an answer, shown as a line of links in the notes (with
+// Google's search suggestions, which its terms ask apps to show).
+function addSources(gm) {
+  const links = (gm.groundingChunks || [])
+    .map((c) => c.web)
+    .filter((w) => /^https?:\/\//.test(w?.uri || ''))
+    .map((w) => ({ title: String(w.title || w.uri.replace(/^https?:\/\/([^/]+).*$/, '$1')).slice(0, 80), uri: String(w.uri) }));
+  const html = String(gm.searchEntryPoint?.renderedContent || '');
+  if (!links.length && !html) return;
+  let entry = S.sources;
+  if (!entry) {
+    entry = { who: 'sources', text: '', links: [], html: '', t: Date.now() };
+    transcript.push(entry);
+    S.sources = entry;
+  }
+  for (const l of links) if (!entry.links.some((x) => x.uri === l.uri)) entry.links.push(l);
+  if (html) entry.html = html;
+  entry.text = `Sources: ${entry.links.map((l) => l.title).join(', ')}`;
+  notes.onSpeech(entry);
+  saveSoon();
 }
 
 // What the tutor sees of your page

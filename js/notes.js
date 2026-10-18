@@ -18,6 +18,35 @@ function setSpeech(p, text) {
   else p.textContent = t;
 }
 
+// The web pages Google Search found for an answer, and Google's search suggestions as it sent
+// them (in a sandboxed frame, so its HTML can't touch the app).
+function fillSources(li, entry) {
+  li.replaceChildren();
+  if (entry.links.length) {
+    const p = document.createElement('p');
+    p.className = 'nt__sources';
+    p.append('Sources: ');
+    entry.links.forEach((l, i) => {
+      if (i) p.append(' · ');
+      const a = document.createElement('a');
+      a.href = l.uri;
+      a.target = '_blank';
+      a.rel = 'noopener noreferrer';
+      a.textContent = l.title;
+      p.append(a);
+    });
+    li.append(p);
+  }
+  if (entry.html) {
+    const frame = document.createElement('iframe');
+    frame.className = 'nt__search';
+    frame.title = 'Google Search suggestions';
+    frame.setAttribute('sandbox', 'allow-popups allow-popups-to-escape-sandbox');
+    frame.srcdoc = `<base target="_blank">${entry.html}`;
+    li.append(frame);
+  }
+}
+
 export class NotesView {
   constructor({ root, scroll, feed, pill, board, getTranscript }) {
     this.root = root;
@@ -100,11 +129,16 @@ export class NotesView {
 
   sayEl(entry) {
     const li = document.createElement('li');
-    li.className = `nt nt--${entry.who === 'tutor' ? 'tutor' : 'you'}`;
-    const p = document.createElement('p');
-    p.className = 'nt__text';
-    setSpeech(p, entry.text);
-    li.append(p);
+    if (entry.who === 'sources') {
+      li.className = 'nt nt--sources';
+      fillSources(li, entry);
+    } else {
+      li.className = `nt nt--${entry.who === 'tutor' ? 'tutor' : 'you'}`;
+      const p = document.createElement('p');
+      p.className = 'nt__text';
+      setSpeech(p, entry.text);
+      li.append(p);
+    }
     this.els.set(entry, li);
     return li;
   }
@@ -124,8 +158,16 @@ export class NotesView {
     li.className = 'nt nt--block';
     li.dataset.id = String(block.id);
     li.append(this.board.renderBlock(block, page, animate).el);
+    this.whenPicturesLoad(li);
     out.push(li);
     return out;
+  }
+
+  // A picture arriving makes the feed taller after it has scrolled, so settle it again.
+  whenPicturesLoad(el) {
+    for (const img of el.querySelectorAll('img')) {
+      img.addEventListener('load', () => this.follow && this.isOpen && this.showLatest(false), { once: true });
+    }
   }
 
   // A tutor or student line was created or grew.
@@ -138,10 +180,13 @@ export class NotesView {
       li = this.sayEl(entry);
       this.feed.append(li);
       // Anything you say starts a new exchange; so does the tutor speaking up after a quiet spell.
-      if (entry.who !== 'tutor' || now - this.lastAt > NEW_TURN_GAP || !this.turnStart?.isConnected) {
+      const quiet = now - this.lastAt > NEW_TURN_GAP || !this.turnStart?.isConnected;
+      if (entry.who === 'you' || (entry.who === 'tutor' && quiet)) {
         this.turnStart = li;
         this.follow = true;
       }
+    } else if (entry.who === 'sources') {
+      fillSources(li, entry);
     } else {
       setSpeech(li.firstElementChild, entry.text);
     }
@@ -157,11 +202,17 @@ export class NotesView {
       const old = this.feed.querySelector(`.nt--block[data-id="${block.id}"]`);
       if (old) {
         old.replaceChildren(this.board.renderBlock(block, page, true).el);
+        this.whenPicturesLoad(old);
         return;
       }
     }
     this.feed.append(...this.blockEls(block, page, true));
     this.update();
+  }
+
+  // A block taken off the board (a picture Wikipedia didn't have).
+  onRemoved(id) {
+    this.feed.querySelector(`.nt--block[data-id="${id}"]`)?.remove();
   }
 
   update() {

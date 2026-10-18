@@ -183,6 +183,33 @@ export function installMock() {
         this._done();
         return;
       }
+      if (/picture|diagram/i.test(text)) {
+        await this._say("Here's a picture of one from Wikipedia. ");
+        this._tool('show_picture', { query: /tree/i.test(text) ? 'Binary search tree' : 'Unit circle', caption: 'From Wikipedia' });
+        this._done();
+        return;
+      }
+      if (/look (it )?up|search/i.test(text)) {
+        // What a grounded answer carries: the pages Google Search used, and its suggestion chips.
+        this._server({
+          serverContent: {
+            groundingMetadata: {
+              webSearchQueries: ['eigenvalues definition'],
+              groundingChunks: [
+                { web: { uri: 'https://en.wikipedia.org/wiki/Eigenvalues_and_eigenvectors', title: 'wikipedia.org' } },
+                { web: { uri: 'https://www.mathsisfun.com/algebra/eigenvalue.html', title: 'mathsisfun.com' } },
+              ],
+              searchEntryPoint: {
+                renderedContent:
+                  '<style>.chip{display:inline-block;padding:6px 12px;border:1px solid #ddd;border-radius:16px;font:14px sans-serif;color:#1a0dab;text-decoration:none}</style><a class="chip" href="https://www.google.com/search?q=eigenvalues+definition">eigenvalues definition</a>',
+              },
+            },
+          },
+        });
+        await this._say('I looked it up: an eigenvalue is how much the eigenvector is stretched. ');
+        this._done();
+        return;
+      }
       // Anything else: a short worked explanation that exercises every board feature.
       await this._say("Sure. Let's do it on the board, one step at a time. ");
       this._tool('new_board_page', { title: 'Integration by parts' });

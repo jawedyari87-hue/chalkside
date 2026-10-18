@@ -16,6 +16,7 @@ const SHELL = [
   './js/store.js',
   './js/pdfimport.js',
   './js/notes.js',
+  './js/pictures.js',
   './manifest.webmanifest',
   './icons/icon-192.png',
   './icons/icon-512.png',
