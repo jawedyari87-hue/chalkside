@@ -284,8 +284,8 @@ pdfInput.addEventListener('change', () => {
   });
 });
 
-// Pick pages of a PDF in the page dialog, then onPick(pdf, pageNumbers). maxPages caps the choice.
-async function choosePdfPages(file, { verb, busy, help, maxPages = 0 }, onPick) {
+// Pick pages of a PDF in the page dialog, then onPick(pdf, pageNumbers).
+async function choosePdfPages(file, { verb, busy, help }, onPick) {
   $('#pdfTitle').textContent = file.name.replace(/\.pdf$/i, '');
   $('#pdfHelp').textContent = help;
   pdfGrid.innerHTML = '<p class="help">Opening the PDF…</p>';
@@ -300,9 +300,8 @@ async function choosePdfPages(file, { verb, busy, help, maxPages = 0 }, onPick) 
     return;
   }
   const selected = showThumbnails(pdf, pdfGrid, (n) => {
-    const tooMany = maxPages && n > maxPages;
-    pdfAdd.disabled = n === 0 || tooMany;
-    pdfAdd.textContent = tooMany ? `Up to ${maxPages} pages at a time` : n > 1 ? `${verb} ${n} pages` : `${verb} page`;
+    pdfAdd.disabled = n === 0;
+    pdfAdd.textContent = n > 1 ? `${verb} ${n} pages` : `${verb} page`;
   });
   pdfAdd.onclick = async () => {
     const pages = selected();
@@ -1438,6 +1437,10 @@ function setupOverlay() {
   $('#shareBtn').addEventListener('click', pickFileToShare);
   shareInput.addEventListener('change', onShareFile);
   shareInput.addEventListener('cancel', reopenAfterPick);
+  $('#shareStop').addEventListener('click', () => {
+    share.stop = true;
+    $('#shareStop').hidden = true;
+  });
   setOvMode('bubble');
 }
 
@@ -1541,9 +1544,14 @@ function onNative(type) {
   }
 }
 
-// ---- showing the tutor a file: pages of a PDF, or a picture (Android app) ----------------------
+// ---- showing the tutor a file: a whole PDF, or a picture (Android app) -------------------------
+//
+// The Live API takes pictures, not documents, so a PDF goes over as a picture of each page,
+// about one a second (the same way as the screen), then a note saying what they were.
 
 const shareInput = $('#shareInput');
+const SHARE_MAX_PAGES = 60;
+const share = { busy: false, stop: false };
 let reopenPanel = false;
 
 // The panel shrinks to the bar while Android's file picker is open, and opens again afterwards.
@@ -1552,6 +1560,7 @@ function pickFileToShare() {
     toast('Start the tutor first, then show it a file.', { ms: 4000 });
     return;
   }
+  if (share.busy) return;
   reopenPanel = ov.mode === 'panel';
   setOvMode('bubble');
   shareInput.click();
@@ -1566,50 +1575,111 @@ async function onShareFile() {
   const file = shareInput.files?.[0];
   shareInput.value = '';
   reopenAfterPick();
-  if (!file) return;
-  const name = file.name || 'a file';
-  try {
-    if (/pdf$/i.test(file.type) || /\.pdf$/i.test(name)) {
-      if (ov.mode !== 'panel') setOvMode('panel'); // the page chooser needs the room
-      const opts = { verb: 'Show', busy: 'Sending…', help: 'Tap the pages to show the tutor.', maxPages: 6 };
-      choosePdfPages(file, opts, async (pdf, pages) => {
-        const images = [];
-        for (const n of pages) images.push((await renderPdfPage(pdf, n, 1400)).toDataURL('image/jpeg', 0.85).split(',')[1]);
-        await shareWithTutor(images, `${name} (${pages.length > 1 ? `pages ${pages.join(', ')}` : `page ${pages[0]}`})`);
-      });
-    } else if (/^image\//i.test(file.type) || /\.(png|jpe?g|webp|gif|bmp)$/i.test(name)) {
-      const img = await imageToDataUrl(file, 1600, 0.85);
-      await shareWithTutor([img.src.split(',')[1]], name);
-    } else {
-      toast('Choose a PDF or a picture.', { ms: 4000 });
-    }
-  } catch (err) {
-    toast(err.message || "That file couldn't be opened.", { kind: 'error' });
-  }
-}
-
-// Pictures of the file go to the tutor the same way as the screen, then a note saying what
-// they are, so it doesn't take them for the screen.
-async function shareWithTutor(images, label) {
+  if (!file || share.busy) return;
   if (S.phase !== 'live' || !S.live) {
     toast('The tutor is not connected. Start it, then show it the file again.', { kind: 'error' });
     return;
   }
+  const name = file.name || 'your file';
+  share.busy = true;
+  share.stop = false;
+  $('#shareBtn').disabled = true;
+  try {
+    if (/pdf$/i.test(file.type) || /\.pdf$/i.test(name)) await sharePdf(file, name);
+    else if (/^image\//i.test(file.type) || /\.(png|jpe?g|webp|gif|bmp)$/i.test(name)) await sharePicture(file, name);
+    else toast('Choose a PDF or a picture.', { ms: 4000 });
+  } catch (err) {
+    toast(err.message || "That file couldn't be opened.", { kind: 'error' });
+  } finally {
+    share.busy = false;
+    $('#shareBtn').disabled = false;
+    shareStatus('');
+  }
+}
+
+async function sharePicture(file, name) {
+  const img = await imageToDataUrl(file, 1600, 0.85);
+  shareStatus(`Sending ${name}…`);
+  if (!(await sendPicture(img.src.split(',')[1]))) throw new Error('The tutor disconnected while the picture was being sent.');
+  tellTutor(name, `[The student has shared a picture, ${name}. The newest image shows it, not their screen. Look at it closely.]`);
+}
+
+async function sharePdf(file, name) {
+  shareStatus(`Opening ${name}…`);
+  const pdf = await openPdf(file);
+  const total = pdf.numPages;
+  const count = Math.min(total, SHARE_MAX_PAGES);
+  let sent = 0;
+  try {
+    for (let n = 1; n <= count && !share.stop; n++) {
+      shareStatus(`Sending ${name}: page ${n} of ${count}`, true);
+      const picture = labelPage(await renderPdfPage(pdf, n, 1200), `${name}, page ${n} of ${total}`);
+      if (!(await sendPicture(picture))) throw new Error(sent ? `The tutor disconnected after page ${sent}.` : 'The tutor disconnected while the PDF was being sent.');
+      sent = n;
+    }
+  } finally {
+    pdf.destroy?.();
+    if (sent) {
+      const part = sent < total ? `the first ${sent} of its ${total} pages` : `all ${total} page${total === 1 ? '' : 's'}`;
+      tellTutor(
+        `${name} (${sent < total ? `pages 1–${sent} of ${total}` : `${total} page${total === 1 ? '' : 's'}`})`,
+        `[The student has shared a PDF, ${name}: ${part}, as the last ${sent} image${sent === 1 ? '' : 's'}, in order. Each page is labelled with its page number at the top. They are a file, not the student's screen. Look at them closely.]`,
+      );
+    }
+  }
+  if (total > SHARE_MAX_PAGES && !share.stop) toast(`That PDF has ${total} pages, so the tutor was shown the first ${SHARE_MAX_PAGES}.`, { ms: 6000 });
+}
+
+// A strip above the page saying which page it is, so the tutor can say "on page 3".
+function labelPage(canvas, label) {
+  const strip = 44;
+  const out = document.createElement('canvas');
+  out.width = canvas.width;
+  out.height = canvas.height + strip;
+  const g = out.getContext('2d');
+  g.fillStyle = '#ffffff';
+  g.fillRect(0, 0, out.width, out.height);
+  g.drawImage(canvas, 0, strip);
+  g.fillStyle = '#444444';
+  g.font = '600 24px sans-serif';
+  g.textBaseline = 'middle';
+  g.fillText(label, 24, strip / 2, out.width - 48);
+  g.fillStyle = '#cccccc';
+  g.fillRect(0, strip - 2, out.width, 2);
+  return out.toDataURL('image/jpeg', 0.85).split(',')[1];
+}
+
+// One picture, at least a second after the last (the screen waits meanwhile). Rides out a reconnect.
+async function sendPicture(data) {
   S.sharingFile = true;
   try {
-    for (const data of images) {
-      const wait = 1000 - (performance.now() - S.lastFrameAt);
-      if (wait > 0) await sleep(wait);
-      if (!S.live?.send({ realtimeInput: { video: { data, mimeType: 'image/jpeg' } } })) throw new Error('The tutor disconnected while the file was being sent.');
-      S.lastFrameAt = performance.now();
+    const wait = 1000 - (performance.now() - S.lastFrameAt);
+    if (wait > 0) await sleep(wait);
+    for (let tries = 0; tries < 20; tries++) {
+      if (S.live?.send({ realtimeInput: { video: { data, mimeType: 'image/jpeg' } } })) {
+        S.lastFrameAt = performance.now();
+        return true;
+      }
+      if (S.phase !== 'reconnecting') return false;
+      await sleep(500);
     }
+    return false;
   } finally {
     S.sharingFile = false;
   }
-  const which = images.length > 1 ? `the last ${images.length} images show it` : 'the newest image shows it';
-  sendRaw(`[The student has shared a file, ${label}: ${which}, not their screen. Look at it closely.] Can you take a look at this?`);
+}
+
+// Tell the tutor what it was just shown, and show it in the notes.
+function tellTutor(label, note) {
+  if (!sendRaw(`${note} Can you take a look at this?`)) return;
   logYou(`Shared ${label}`);
   setAwaiting();
+}
+
+function shareStatus(text, canStop = false) {
+  $('#shareStatus').hidden = !text;
+  $('#shareStatusText').textContent = text;
+  $('#shareStop').hidden = !canStop;
 }
 
 // ---- the Android app's settings screen (?overlay&settings) ------------------------------------

@@ -654,6 +654,11 @@ html.is-overlay, html.is-overlay body { background: transparent; }
 .is-overlay .notes__foot { display: grid; gap: 8px; }
 .is-overlay .notes__foot .type-ask { max-width: none; margin: 0; }
 .btn--attach { background: transparent; border-color: rgba(237, 241, 231, 0.24); color: var(--chalk); }
+.share-status {
+  display: flex; align-items: center; gap: 10px; min-height: 40px; padding: 3px 4px 3px 12px;
+  border-radius: 10px; background: rgba(0, 0, 0, 0.22); color: var(--chalk); font-size: 14px; font-weight: 600;
+}
+.share-status__text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .is-overlay .asks--screen { display: flex; }
 
 /* ---- the Android app's settings screen (?overlay&settings): just the settings, full screen ---- */
