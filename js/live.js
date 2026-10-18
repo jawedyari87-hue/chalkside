@@ -27,7 +27,10 @@ export async function mintToken(apiKey) {
     /* not JSON */
   }
   if (!res.ok || typeof body.name !== 'string') {
-    const reason = body?.error?.message || `sign-in token request failed (HTTP ${res.status})`;
+    let reason = body?.error?.message || `sign-in token request failed (HTTP ${res.status})`;
+    // Which limit, from the error's details: the message alone often doesn't say.
+    const v = body?.error?.details?.find((d) => Array.isArray(d.violations))?.violations?.[0];
+    if (v?.quotaId) reason += ` [${v.quotaId}${v.quotaValue ? `, limit ${v.quotaValue}` : ''}]`;
     throw Object.assign(new Error(reason), { reason, status: res.status });
   }
   return body.name;
@@ -46,6 +49,9 @@ const OPTIONAL_FIELDS = [
   'mediaResolution', 'thinkingConfig', 'behavior', 'scheduling', 'realtimeInputConfig',
   'contextWindowCompression', 'inputAudioTranscription', 'outputAudioTranscription', 'speechConfig',
   'languageCodes', 'googleSearch',
+  // Listed so a complaint about them drops just them, not all of contextWindowCompression
+  // (without which Google ends a lesson with pictures after two minutes).
+  'triggerTokens', 'targetTokens',
 ];
 
 const decoder = new TextDecoder();
@@ -86,18 +92,54 @@ export function stripFields(obj, fields) {
   return obj;
 }
 
+// A usage limit. Not just any "exceeded": a deadline or a session length can be exceeded too,
+// and a new connection fixes those.
+export function isQuota(reason = '') {
+  return /quota|RESOURCE_EXHAUSTED|rate.?limit|exceeded your current/i.test(reason);
+}
+
 // Problems that retrying will not fix.
 export function isFatal(reason = '') {
-  return /API key|API_KEY|PERMISSION_DENIED|permission|billing|quota|RESOURCE_EXHAUSTED|exceeded|not found for API version|not supported for bidiGenerateContent|is not found|location is not supported|not available in your country/i.test(
-    reason,
+  return (
+    isQuota(reason) ||
+    /API key|API_KEY|PERMISSION_DENIED|permission|billing|not found for API version|not supported for bidiGenerateContent|is not found|location is not supported|not available in your country/i.test(reason)
   );
+}
+
+// When Google's daily limits reset (midnight in California), as a time on this device's clock.
+function dailyReset() {
+  const now = new Date();
+  const p = Object.fromEntries(
+    new Intl.DateTimeFormat('en-US', { timeZone: 'America/Los_Angeles', hourCycle: 'h23', hour: 'numeric', minute: 'numeric', second: 'numeric' })
+      .formatToParts(now)
+      .map((x) => [x.type, Number(x.value)]),
+  );
+  const left = 86400 - (p.hour * 3600 + p.minute * 60 + p.second);
+  return new Date(now.getTime() + left * 1000).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+}
+
+// What to do about a usage limit. Limits belong to the Google Cloud project behind a key, not the key itself.
+function limitAdvice(reason) {
+  if (/per.?minute|PerMinute/i.test(reason)) return "It's a per-minute limit: wait a minute, then start again.";
+  if (/per.?day|PerDay|daily/i.test(reason)) return `It's the daily limit, which resets at ${dailyReset()}.`;
+  return `If starting again in a minute doesn't help, the daily limit is used up. It resets at ${dailyReset()}.`;
+}
+
+const clip = (s, n = 200) => (s.length > n ? `${s.slice(0, n - 1).trimEnd()}…` : s);
+
+// The telling part of a quota message: which limit, when Google says.
+function quotaWords(reason) {
+  const r = reason.trim();
+  const id = /\[([A-Za-z-]+(?:, limit \d+)?)\]/.exec(r)?.[1];
+  const metric = /Quota exceeded for metric: ([^\n]+)/i.exec(r)?.[1];
+  return clip(id || metric || r);
 }
 
 const isInvalidArgument = (err) => err?.code === 1007 || /invalid argument|INVALID_ARGUMENT/i.test(err?.reason || '');
 
 // When the server says "invalid argument" without naming a field, drop the
 // newest optional settings one at a time, most likely culprit first.
-const BLIND_STRIP_ORDER = ['languageCodes', 'googleSearch', 'mediaResolution', 'thinkingConfig', 'behavior', 'realtimeInputConfig', 'contextWindowCompression', 'outputAudioTranscription', 'inputAudioTranscription'];
+const BLIND_STRIP_ORDER = ['triggerTokens', 'targetTokens', 'languageCodes', 'googleSearch', 'mediaResolution', 'thinkingConfig', 'behavior', 'realtimeInputConfig', 'contextWindowCompression', 'outputAudioTranscription', 'inputAudioTranscription'];
 
 function hasField(obj, field) {
   if (Array.isArray(obj)) return obj.some((v) => hasField(v, field));
@@ -109,8 +151,7 @@ export function friendlyError(reason = '', code = 0) {
   if (/API key not valid|API_KEY_INVALID|API key expired/i.test(reason)) return 'Gemini rejected the API key. Check it in Settings.';
   if (/ACCESS_TOKEN_TYPE_UNSUPPORTED|Expected OAuth 2 access token|invalid authentication credentials/i.test(reason))
     return `Google didn't accept this key for live voice, either directly or as a sign-in token. Google said: ${reason}`;
-  if (/quota|RESOURCE_EXHAUSTED|exceeded|rate limit/i.test(reason))
-    return "You've hit your Gemini usage limit for now. Wait a few minutes, or check the limits in Google AI Studio.";
+  if (isQuota(reason)) return `Gemini's usage limit for this key's Google project has been reached. ${limitAdvice(reason)} Google said: "${quotaWords(reason)}"`;
   if (/location is not supported|not available in your country/i.test(reason)) return "Google doesn't offer this Gemini model where you are.";
   if (/not found|not supported for bidiGenerateContent/i.test(reason)) return 'That model is not available for this API key. Pick another model in Settings.';
   if (/PERMISSION_DENIED|permission|billing/i.test(reason)) return `Google refused access: ${reason}`;
@@ -123,7 +164,7 @@ export function friendlyError(reason = '', code = 0) {
 function bestError(errors) {
   const pick =
     errors.find((e) => /API key not valid|API_KEY_INVALID|API key expired/i.test(e.reason || '')) ||
-    errors.find((e) => /quota|RESOURCE_EXHAUSTED/i.test(e.reason || '')) ||
+    errors.find((e) => isQuota(e.reason)) ||
     errors.find((e) => isFatal(e.reason)) ||
     [...errors].reverse().find((e) => e.reason) ||
     errors.at(-1);
@@ -251,7 +292,7 @@ export class LiveSession extends EventTarget {
       } catch (err) {
         // The token request failed (blocked, refused, or offline): try the key itself.
         errors.push(err);
-        if (m + 1 < modes.length && !/quota|RESOURCE_EXHAUSTED/i.test(err.reason || '')) {
+        if (m + 1 < modes.length && !isQuota(err.reason)) {
           m++;
           continue;
         }

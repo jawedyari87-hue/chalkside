@@ -5,7 +5,7 @@ import { $, $$, clamp, debounce, sleep, uid, prefs, bytesToBase64, base64ToBytes
 import { InkPage, PEN_COLOURS, HL_COLOURS, SWATCH } from './ink.js';
 import { Board } from './board.js';
 import { AudioEngine } from './audio.js';
-import { LiveSession } from './live.js';
+import { LiveSession, isQuota } from './live.js';
 import { MODELS, VOICES, modelProfile, buildSystemPrompt, buildTools, ASKS, SCREEN_ASKS } from './prompt.js';
 import { lessons } from './store.js';
 import { openPdf, renderPdfPage, showThumbnails } from './pdfimport.js';
@@ -792,6 +792,8 @@ const S = {
   lastImage: '', // what the tutor saw last: 'screen', 'pc' or a shared 'file' (Android app)
   pcSeq: -1, // the newest picture of a linked PC sent to the tutor
   preferPc: false, // the PC's turn next, when both screens have something new
+  seen: { tablet: -1, pc: -1 }, // the newest picture of each screen at the last look, sent or not
+  usage: null, // Gemini's newest token counts, logged when an answer ends
   sources: null, // this answer's line of web sources in the notes
 };
 
@@ -842,7 +844,10 @@ function buildSetup() {
     // Left to guess, the transcript of what you say sometimes comes out in another language.
     inputAudioTranscription: { languageCodes: ['en-GB'] },
     outputAudioTranscription: {},
-    contextWindowCompression: { slidingWindow: {} },
+    // Every answer re-reads the whole conversation so far, pictures included, and Gemini's per-minute
+    // limits count all of it. Left alone the conversation grows to most of the model's context
+    // window before anything is dropped; this keeps it to the last few minutes.
+    contextWindowCompression: { triggerTokens: 32000, slidingWindow: { targetTokens: 16000 } },
   };
   if (Object.keys(vad).length) setup.realtimeInputConfig = { automaticActivityDetection: vad };
   return setup;
@@ -916,18 +921,26 @@ async function startSession(thenAsk = null) {
   });
   live.addEventListener('fail', (ev) => {
     if (S.live !== live) return;
+    console.warn('[chalkside] Gemini ended the lesson:', ev.detail.reason || '(no reason given)');
     endSession({ quiet: true });
-    toast(ev.detail.message, { kind: 'error', ms: 12000 });
+    toast(withKeyDetails(ev.detail.message, ev.detail.reason, apiKey), { kind: 'error', ms: 15000 });
   });
   live.addEventListener('warn', (ev) => console.warn('[chalkside]', ev.detail.message));
   try {
     await live.start();
   } catch (err) {
     if (S.live !== live) return;
+    console.warn('[chalkside] Gemini refused the lesson:', err.reason || err.message);
     endSession({ quiet: true });
     const fixable = /key|model|Settings/i.test(err.message);
-    toast(err.message, { kind: 'error', ms: 14000, actionLabel: fixable ? 'Settings' : undefined, onAction: () => openSettings() });
+    toast(withKeyDetails(err.message, err.reason, apiKey), { kind: 'error', ms: 15000, actionLabel: fixable ? 'Settings' : undefined, onAction: () => openSettings() });
   }
+}
+
+// For a usage limit, which key and model it was, so you can tell whether a new key is really in use.
+function withKeyDetails(message, reason, apiKey) {
+  if (!isQuota(reason) || !apiKey || apiKey === 'mock') return message;
+  return `${message} (Key ending …${apiKey.slice(-4)}, model ${S.profile?.id || modelProfile(settings).id}.)`;
 }
 
 function onOpen(resumed) {
@@ -1101,7 +1114,11 @@ function vadStep(rms) {
   if (!S.hearing && S.vadAbove >= 5 && !S.muted) {
     S.hearing = true;
     S.lastUserSpeechAt = performance.now();
-    if (S.phase === 'live' && performance.now() - S.lastFrameAt > 20000 && canSee()) sendFrame({ force: true });
+    if (S.phase === 'live' && canSee()) {
+      // Before the question arrives, make sure the tutor has the screen as it is now.
+      if (performance.now() - S.lastFrameAt > 20000) sendFrame({ force: true });
+      else if (SCREEN) sendScreenFrame(false, true);
+    }
     updateStatus();
   } else if (S.hearing && S.vadBelow >= 20) {
     S.hearing = false;
@@ -1132,6 +1149,7 @@ function levelLoopStop() {
 // Server messages
 
 function onServer(msg, conn) {
+  if (msg.usageMetadata) S.usage = msg.usageMetadata;
   const sc = msg.serverContent;
   if (sc) {
     if (sc.interrupted) {
@@ -1160,6 +1178,10 @@ function onServer(msg, conn) {
     }
     if (sc.groundingMetadata) addSources(sc.groundingMetadata);
     if (sc.turnComplete) {
+      // How much each answer cost: Gemini's per-minute limits count every token it reads.
+      const u = msg.usageMetadata || S.usage;
+      if (u) console.info(`[chalkside] tokens: ${u.promptTokenCount ?? '?'} read (${u.cachedContentTokenCount ?? 0} cached), ${u.responseTokenCount ?? '?'} written`);
+      S.usage = null;
       finishTutorLine();
       S.dropAudio = false;
       S.sources = null; // the next answer gets its own sources line
@@ -1397,14 +1419,25 @@ const frameSoon = debounce(() => sendFrame(), 1000, 4000);
 // The Android app captures the screen and only has a new picture when something on it
 // has changed. force sends the tablet's newest one again, for when the last was a while ago.
 // A linked PC sends pictures too: when both have something new they take turns.
-function sendScreenFrame(force) {
+//
+// While a screen keeps changing (writing, scrolling) it gets a picture every few seconds, and
+// its newest goes as soon as it stops. Every picture stays in the conversation that the tutor
+// re-reads for each answer, which is what Gemini's per-minute limits count. urgent (a question
+// is coming) sends the newest without waiting for the screen to stop.
+const STEADY_MS = 3000;
+
+function sendScreenFrame(force, urgent = false) {
   if (!droid || S.screenPaused || S.sharingFile) return false;
   const now = performance.now();
-  if (now - S.lastFrameAt < 900) return false; // the app makes at most one a second; this allows for timer jitter
+  const since = now - S.lastFrameAt;
+  if (since < 900) return false; // the app makes at most one a second; this allows for timer jitter
   const order = S.preferPc && !force ? ['pc', 'tablet'] : ['tablet', 'pc'];
   for (const source of order) {
     const frame = newestPicture(source, force && source === 'tablet');
     if (!frame) continue;
+    const stopped = S.seen[source] === frame.seq; // no newer picture since the last look
+    S.seen[source] = frame.seq;
+    if (!force && !urgent && !stopped && since < STEADY_MS) continue;
     if (!S.live.send({ realtimeInput: { video: { data: frame.data, mimeType: 'image/jpeg' } } })) return false;
     if (source === 'pc') S.pcSeq = frame.seq;
     else S.screenSeq = frame.seq;
@@ -1434,7 +1467,7 @@ async function freshFrame(forceScreen = false) {
   if (SCREEN) {
     const wait = 1000 - (performance.now() - S.lastFrameAt);
     if (wait > 0) await sleep(wait);
-    if (sendScreenFrame(forceScreen || performance.now() - S.lastFrameAt > 20000)) await sleep(350);
+    if (sendScreenFrame(forceScreen || performance.now() - S.lastFrameAt > 20000, true)) await sleep(350);
     return;
   }
   const stale = frameKey() !== S.lastFrameKey || performance.now() - S.lastFrameAt > 20000;
