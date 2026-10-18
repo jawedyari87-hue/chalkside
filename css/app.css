@@ -516,6 +516,13 @@ dialog.sheet::backdrop { background: rgba(8, 18, 14, 0.5); }
 .check, .radio { display: flex; align-items: center; gap: 10px; min-height: 42px; font-weight: 400; }
 .check input, .radio input { width: 20px; height: 20px; flex: none; accent-color: var(--accent); }
 .help { margin: 0; font-size: 14px; color: var(--desk-muted); }
+.mic-test { display: flex; align-items: center; gap: 12px; margin-top: 10px; }
+.mic-test .btn { flex: none; }
+.mic-meter { flex: 1; height: 10px; border-radius: 5px; background: var(--desk-line); overflow: hidden; }
+.mic-meter span { display: block; height: 100%; width: calc(var(--v, 0) * 100%); background: var(--accent); transition: width 0.08s linear; }
+.mic-help { margin-top: 10px; padding: 10px 12px; border-radius: 10px; background: color-mix(in srgb, var(--accent) 10%, transparent); font-size: 14px; }
+.mic-help ol { margin: 6px 0 0; padding-left: 20px; }
+.mic-help li + li { margin-top: 4px; }
 .help a { color: var(--accent); font-weight: 700; }
 .notice { margin: 0; padding: 10px 14px; border-radius: 10px; background: color-mix(in srgb, var(--accent) 16%, transparent); font-weight: 700; }
 

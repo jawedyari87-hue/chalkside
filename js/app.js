@@ -35,6 +35,8 @@ if (MOCK) {
 }
 const droid = OVERLAY ? window.ChalksideAndroid || null : null;
 const asks = SCREEN ? SCREEN_ASKS : ASKS;
+// iPads and iPhones, where every browser runs on Safari's engine. iPads say they are Macs.
+const IOS = /iP(hone|ad|od)/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
 
 // ---- settings --------------------------------------------------------------------
 
@@ -663,7 +665,8 @@ $('#sKeyShow').addEventListener('click', (e) => {
   e.currentTarget.textContent = show ? 'Hide' : 'Show';
 });
 
-function openSettings(reason = '') {
+// mic: open at the Microphone section, with the steps to allow it.
+function openSettings(reason = '', { mic = false } = {}) {
   if (SCREEN) {
     // The floating window has no room for the settings form, so the app opens its settings screen.
     if (reason) toast(reason, { ms: 6000 });
@@ -696,7 +699,10 @@ function openSettings(reason = '') {
   reasonEl.textContent = reason;
   reasonEl.hidden = !reason;
   settingsDlg.showModal();
-  if (reason || !settings.apiKey) f.key.focus();
+  if (!mic && (reason || !settings.apiKey)) f.key.focus();
+  refreshMicState(mic).then(() => {
+    if (mic) $('#sMicGroup').scrollIntoView({ block: 'start' });
+  });
 }
 
 $('#settingsBtn').addEventListener('click', () => openSettings());
@@ -870,14 +876,126 @@ function connectionNote() {
   return `Last connected using ${how}.`;
 }
 
+// ---- the microphone: errors, how to allow it, and a test in Settings ---------------------------
+
+const micBlocked = (err) => err?.name === 'NotAllowedError' || err?.name === 'SecurityError';
+
 function micError(err) {
   if (!window.isSecureContext) return 'The microphone only works when Chalkside is opened from an https:// address, such as GitHub Pages.';
-  if (err?.name === 'NotAllowedError' || err?.name === 'SecurityError')
-    return 'Chalkside needs the microphone. Allow it for this site in the browser settings, then tap Start tutor again.';
+  if (micBlocked(err)) return 'Chalkside needs the microphone, and this browser is blocking it for this site.';
   if (err?.name === 'NotFoundError') return 'No microphone was found on this device.';
   if (err?.name === 'NotReadableError') return 'Another app is using the microphone. Close it and try again.';
   return err?.message || 'The microphone could not be started.';
 }
+
+// A "How to allow it" button for an error message, where the website can show the steps.
+function micHelpAction(err) {
+  if (!micBlocked(err) || OVERLAY) return {};
+  return { actionLabel: 'How to allow it', onAction: () => openSettings('', { mic: true }) };
+}
+
+// How to let this site use the microphone, in the browser in front of you.
+function micHelpSteps() {
+  const ua = navigator.userAgent;
+  const again = 'Reload this page, then tap <strong>Start tutor</strong>.';
+  if (IOS) {
+    const app = /CriOS/.test(ua) ? 'Chrome' : /EdgiOS/.test(ua) ? 'Edge' : /FxiOS/.test(ua) ? 'Firefox' : 'Safari';
+    if (app !== 'Safari') return [`Open the iPad's <strong>Settings</strong>, then <strong>Apps → ${app}</strong>, and turn on <strong>Microphone</strong>.`, again];
+    return [
+      'Tap <strong>aA</strong> (or the page menu) at the left of the address bar, then <strong>Website Settings</strong>, and set <strong>Microphone</strong> to <strong>Allow</strong>.',
+      "If that doesn't help, open the iPad's <strong>Settings</strong>, then <strong>Apps → Safari → Microphone</strong> (on older iPads, <strong>Safari → Microphone</strong>), and choose <strong>Ask</strong> or <strong>Allow</strong>.",
+      again,
+    ];
+  }
+  if (/Android/.test(ua)) return ['Tap the icon at the left of the address bar, then <strong>Permissions</strong>, and allow <strong>Microphone</strong>.', again];
+  if (/Firefox\//.test(ua)) return ['Click the microphone or padlock icon in the address bar, and remove the block on the microphone.', again];
+  if (/Safari\//.test(ua) && !/Chrome|Chromium|Edg\//.test(ua))
+    return ['In the menu bar choose <strong>Safari → Settings for This Website</strong>, and set <strong>Microphone</strong> to <strong>Allow</strong>.', again];
+  return ['Click the icon at the left of the address bar, then <strong>Site settings</strong>, and set <strong>Microphone</strong> to <strong>Allow</strong>.', again];
+}
+
+function showMicHelp(on) {
+  const box = $('#sMicHelp');
+  box.hidden = !on;
+  if (on) box.innerHTML = `<strong>To let Chalkside use the microphone:</strong><ol>${micHelpSteps().map((s) => `<li>${s}</li>`).join('')}</ol>`;
+}
+
+// 'granted', 'denied', 'prompt', or 'unknown' where the browser won't say.
+async function micPermission() {
+  try {
+    return (await navigator.permissions.query({ name: 'microphone' })).state;
+  } catch {
+    return 'unknown';
+  }
+}
+
+async function refreshMicState(showSteps = false) {
+  const state = await micPermission();
+  const say = (t) => ($('#sMicState').textContent = t);
+  if (state === 'denied') say("This browser is blocking the microphone for this site, so the tutor can't hear you.");
+  else if (state === 'granted') say('The microphone is allowed. Test it to check the tutor will hear you.');
+  else say('The tutor needs your microphone. Test it now, and allow it when your browser asks.');
+  showMicHelp(showSteps || state === 'denied');
+}
+
+// Opens the microphone (asking if need be) and shows its level for a few seconds.
+let micTesting = false;
+$('#sMicTest').addEventListener('click', async () => {
+  if (micTesting) return;
+  micTesting = true;
+  const btn = $('#sMicTest');
+  const meter = $('#sMicMeter');
+  const say = (t) => ($('#sMicState').textContent = t);
+  btn.disabled = true;
+  audio.unlock(); // in the tap, for iPads
+  const borrowed = !!audio.stream; // a lesson's microphone: leave it open afterwards
+  try {
+    say('Asking for the microphone…');
+    await audio.openMic();
+    await audio.init();
+  } catch (err) {
+    say(micError(err));
+    showMicHelp(micBlocked(err));
+    btn.disabled = false;
+    micTesting = false;
+    return;
+  }
+  const src = audio.ctx.createMediaStreamSource(audio.stream);
+  const an = audio.ctx.createAnalyser();
+  an.fftSize = 1024;
+  src.connect(an);
+  const buf = new Float32Array(an.fftSize);
+  let peak = 0;
+  meter.hidden = false;
+  say('Say something: the bar should move.');
+  const end = performance.now() + 6000;
+  await new Promise((done) => {
+    const tick = () => {
+      an.getFloatTimeDomainData(buf);
+      let s = 0;
+      for (const v of buf) s += v * v;
+      const rms = Math.sqrt(s / buf.length);
+      peak = Math.max(peak, rms);
+      meter.style.setProperty('--v', Math.min(1, rms * 8).toFixed(3));
+      if (performance.now() < end && settingsDlg.open) requestAnimationFrame(tick);
+      else done();
+    };
+    tick();
+  });
+  src.disconnect();
+  meter.hidden = true;
+  if (!borrowed && !sessionActive()) audio.stopMic();
+  if (peak > 0.015) {
+    say('Your microphone works. The tutor will hear you.');
+    showMicHelp(false);
+  } else if (audio.ctx.state !== 'running') {
+    say('No sound came through, because the browser has paused sound on this page. Tap the button again.');
+  } else {
+    say("No sound reached Chalkside. Check the microphone isn't muted or in use by another app, then test again.");
+  }
+  btn.disabled = false;
+  micTesting = false;
+});
 
 async function startSession(thenAsk = null) {
   if (sessionActive()) return;
@@ -892,6 +1010,9 @@ async function startSession(thenAsk = null) {
   S.pendingAsk = thenAsk;
   S.profile = modelProfile(settings);
   setPhase('connecting');
+  // On an iPad the sound has to start in this tap, before the microphone question is awaited,
+  // or the lesson connects with no sound and a microphone that hears nothing.
+  if (IOS) audio.unlock();
   try {
     await audio.openMic(); // before the speaker: see AudioEngine.openMic
     await audio.init();
@@ -899,7 +1020,7 @@ async function startSession(thenAsk = null) {
   } catch (err) {
     audio.stopMic();
     setPhase('idle');
-    toast(micError(err), { kind: 'error', ms: 10000 });
+    toast(micError(err), { kind: 'error', ms: 12000, ...micHelpAction(err) });
     return;
   }
   const apiKey = settings.apiKey || 'mock';
@@ -945,6 +1066,7 @@ function withKeyDetails(message, reason, apiKey) {
 
 function onOpen(resumed) {
   setPhase('live');
+  S.lastMicChunkAt = performance.now(); // a moment's grace before checkMic expects sound
   if (resumed) {
     // Anything written while reconnecting goes over now.
     frameSoon();
@@ -994,6 +1116,7 @@ function endSession({ quiet = false } = {}) {
   stopTimer();
   releaseWake();
   clearTimeout(S.awaitTimer);
+  clearMicAlert();
   Object.assign(S, { tutorTalking: false, awaiting: false, hearing: false, dropAudio: false, pendingAsk: null, muted: false });
   finishTutorLine();
   S.youLine = null;
@@ -1041,6 +1164,7 @@ function startTimer() {
     const label = S.profile ? S.profile.label : '';
     const pc = SCREEN && typeof droid?.pcLinked === 'function' && droid.pcLinked() ? ' · PC' : ''; // your PC is linked
     statusMeta.textContent = `${fmtClock((Date.now() - S.startedAt) / 1000)}${label ? ' · ' + label : ''}${pc}`;
+    checkMic();
   };
   tick();
   S.timer = setInterval(tick, 1000);
@@ -1095,10 +1219,43 @@ skipBtn.addEventListener('click', () => {
 // Microphone
 
 function onMicChunk(int16, rms) {
+  S.lastMicChunkAt = performance.now();
   S.micLevel = S.micLevel * 0.6 + rms * 0.4;
   vadStep(rms);
   if (S.phase !== 'live' || S.muted || !S.live) return;
   S.live.send({ realtimeInput: { audio: { data: bytesToBase64(new Uint8Array(int16.buffer)), mimeType: 'audio/pcm;rate=16000' } } });
+}
+
+// The microphone sends a piece of sound every 40 ms, even when you're quiet or muted. If none
+// has come for a few seconds the tutor can't hear you: the browser paused the page's sound (an
+// iPad does this without a tap), or the system took the microphone away. Offer a one-tap fix.
+function checkMic() {
+  if (S.phase !== 'live') return;
+  const hearing = performance.now() - (S.lastMicChunkAt || 0) <= 4000 && audio.ctx?.state === 'running';
+  if (hearing) {
+    clearMicAlert(); // it came back by itself
+    return;
+  }
+  if (S.micAlert) return;
+  S.micAlert = toast("The tutor can't hear your microphone.", { kind: 'error', ms: 0, actionLabel: 'Turn it on', onAction: fixMic }) || true;
+}
+
+function clearMicAlert() {
+  if (S.micAlert?.remove) S.micAlert.remove();
+  S.micAlert = null;
+}
+
+async function fixMic() {
+  audio.unlock(); // in the tap, which is what an iPad needs
+  try {
+    await audio.startMic(onMicChunk);
+    S.lastMicChunkAt = performance.now();
+    clearMicAlert();
+    toast('Microphone on. Try talking again.', { ms: 3000 });
+  } catch (err) {
+    clearMicAlert();
+    toast(micError(err), { kind: 'error', ms: 12000, ...micHelpAction(err) });
+  }
 }
 
 // A rough local voice detector, only for the UI and for refreshing the page image.

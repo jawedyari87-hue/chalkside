@@ -65,29 +65,40 @@ export class AudioEngine extends EventTarget {
     this.stream = null;
   }
 
+  // iPads and iPhones only start sound inside a tap. A tap handler calls this before it awaits
+  // anything: it makes (or wakes) the AudioContext there and then.
+  unlock() {
+    if (!this.ctx) {
+      const Ctx = window.AudioContext || window.webkitAudioContext;
+      this.ctx = new Ctx({ latencyHint: 'interactive' });
+    }
+    if (this.ctx.state !== 'running') this.ctx.resume().catch(() => {});
+    return this.ctx;
+  }
+
   // Call from a click handler: the AudioContext must be created inside a user gesture.
   async init() {
     // resume() can stay pending without a fresh tap, so never wait on it for long.
     const resumeSoon = (p) => Promise.race([p.catch(() => {}), new Promise((r) => setTimeout(r, 1500))]);
-    if (this.ctx) {
-      if (this.ctx.state !== 'running') await resumeSoon(this.ctx.resume());
-      return;
+    if (!this.ctx) {
+      const Ctx = window.AudioContext || window.webkitAudioContext;
+      this.ctx = new Ctx({ latencyHint: 'interactive' });
     }
-    const Ctx = window.AudioContext || window.webkitAudioContext;
-    this.ctx = new Ctx({ latencyHint: 'interactive' });
-    const resumed = resumeSoon(this.ctx.resume());
-    const url = URL.createObjectURL(new Blob([WORKLET], { type: 'application/javascript' }));
-    try {
-      await this.ctx.audioWorklet.addModule(url);
-    } finally {
-      URL.revokeObjectURL(url);
+    const resumed = this.ctx.state === 'running' ? Promise.resolve() : resumeSoon(this.ctx.resume());
+    if (!this.out) {
+      const url = URL.createObjectURL(new Blob([WORKLET], { type: 'application/javascript' }));
+      try {
+        await this.ctx.audioWorklet.addModule(url);
+      } finally {
+        URL.revokeObjectURL(url);
+      }
+      this.out = this.ctx.createGain();
+      this.analyser = this.ctx.createAnalyser();
+      this.analyser.fftSize = 512;
+      this.levelBuf = new Float32Array(this.analyser.fftSize);
+      this.out.connect(this.analyser);
+      this.analyser.connect(this.ctx.destination);
     }
-    this.out = this.ctx.createGain();
-    this.analyser = this.ctx.createAnalyser();
-    this.analyser.fftSize = 512;
-    this.levelBuf = new Float32Array(this.analyser.fftSize);
-    this.out.connect(this.analyser);
-    this.analyser.connect(this.ctx.destination);
     await resumed;
   }
 
@@ -95,7 +106,9 @@ export class AudioEngine extends EventTarget {
   // cancelling); opening it first means the tutor's voice uses the call path from the start,
   // rather than moving there part-way through a lesson at a different volume.
   async openMic() {
-    if (this.stream) return;
+    // Keep a working microphone; replace one the system has stopped (another app took it, say).
+    if (this.stream?.getAudioTracks().some((t) => t.readyState === 'live')) return;
+    this.stream = null;
     if (!navigator.mediaDevices?.getUserMedia) {
       throw Object.assign(new Error('This browser cannot use the microphone here.'), { name: 'NotSupportedError' });
     }
