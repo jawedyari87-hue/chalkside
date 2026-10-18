@@ -54,6 +54,14 @@ export function installMockNative() {
       state.screenOn = on;
     },
     toast: (text) => log('toast', text),
+    showMarks(json) {
+      log('showMarks', JSON.parse(json));
+      state.marks = JSON.parse(json);
+    },
+    clearMarks() {
+      log('clearMarks');
+      state.marks = [];
+    },
     openSettings: () => log('openSettings'),
     settingsClosed: (hasKey) => log('settingsClosed', hasKey),
     stop: () => log('stop'),

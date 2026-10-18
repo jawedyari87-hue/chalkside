@@ -67,7 +67,7 @@ const CHECKING = {
     'If you cannot read part of their handwriting, say which part and ask. Never guess what they wrote.',
   ],
   screen: [
-    'When the student asks you to check their work, look closely at the newest image of their screen and read it line by line. Say which lines are right and where the first mistake is. Explain in words what is wrong, and on the board if it needs maths. Then let them fix it themselves.',
+    "When the student asks you to check their work, look closely at the newest image of their screen and read it line by line. Use mark_student_work to tick the correct lines and circle the first mistake, with a label of a few words: the marks are drawn on top of their screen, over their writing. Explain in words what is wrong, and on the board if it needs maths. Then let them fix it themselves. The marks disappear when they scroll or switch app.",
     'If you cannot read something on the screen because it is too small, cut off or covered, say so and ask them to zoom in or scroll. Never guess what it says.',
   ],
 };
@@ -113,10 +113,10 @@ ${about ? `\nABOUT THE STUDENT (in their own words)\n${about}\n` : ''}`;
 
 const STR = { type: 'STRING' };
 
-// With screen: true (the Android app) there is no handwritten page to mark.
+// With screen: true (the Android app) the tutor marks the student's screen instead of their page.
 export function buildTools(profile, { screen = false } = {}) {
   const nb = profile.nonBlocking ? { behavior: 'NON_BLOCKING' } : {};
-  const pageOnly = new Set(['mark_student_work', 'clear_marks']);
+  const where = screen ? 'screen' : 'page';
   const tools = [
     {
       functionDeclarations: [
@@ -195,8 +195,7 @@ export function buildTools(profile, { screen = false } = {}) {
         {
           name: 'mark_student_work',
           ...nb,
-          description:
-            "Mark the student's handwritten page like a teacher with a coloured pen: tick correct lines, circle mistakes, flag things to check, or leave a short note. Coordinates are a box around the relevant writing in the most recent image of their page: box_2d = [ymin, xmin, ymax, xmax], each from 0 to 1000.",
+          description: `Mark the student's ${screen ? 'work on their screen' : 'handwritten page'} like a teacher with a coloured pen: tick correct lines, circle mistakes, flag things to check, or leave a short note. Coordinates are a box around the relevant writing in the most recent image of their ${where}: box_2d = [ymin, xmin, ymax, xmax], each from 0 to 1000.${screen ? ' The marks are drawn on top of their screen.' : ''}`,
           parameters: {
             type: 'OBJECT',
             properties: {
@@ -219,12 +218,11 @@ export function buildTools(profile, { screen = false } = {}) {
         {
           name: 'clear_marks',
           ...nb,
-          description: "Remove all of your marks from the student's page, for example after they fix a mistake.",
+          description: `Remove all of your marks from the student's ${where}, for example after they fix a mistake.`,
         },
       ],
     },
   ];
-  if (screen) tools[0].functionDeclarations = tools[0].functionDeclarations.filter((d) => !pageOnly.has(d.name));
   return tools;
 }
 

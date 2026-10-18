@@ -170,7 +170,10 @@ public class TutorService extends Service {
         projection = null;
         stopCapture(false);
         if (stopped) return;
-        if (overlay != null) overlay.send("screen-stopped");
+        if (overlay != null) {
+            overlay.clearMarks(true); // nothing can tell when they stop lining up any more
+            overlay.send("screen-stopped");
+        }
         updateNotification();
     }
 

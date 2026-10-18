@@ -9,6 +9,8 @@ import android.graphics.Insets;
 import android.graphics.PixelFormat;
 import android.graphics.Rect;
 import android.hardware.display.DisplayManager;
+import android.hardware.input.InputManager;
+import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
 import android.view.ContextThemeWrapper;
@@ -78,7 +80,10 @@ final class Overlay {
         ctx.registerComponentCallbacks(new ComponentCallbacks() {
             @Override
             public void onConfigurationChanged(Configuration c) {
-                main.post(Overlay.this::applyLayout); // the tablet turned: keep the window on screen
+                main.post(() -> {
+                    applyLayout(); // the tablet turned: keep the window on screen
+                    clearMarks(true); // and marks no longer line up
+                });
             }
 
             @Override
@@ -93,10 +98,12 @@ final class Overlay {
         wm.addView(root, lp);
         attached = true;
         web.loadUrl(url);
+        captureChanged();
     }
 
     void destroy() {
         if (!attached) return;
+        clearMarks(false);
         attached = false;
         try {
             wm.removeView(root);
@@ -104,6 +111,57 @@ final class Overlay {
             // already gone
         }
         web.destroy();
+    }
+
+    // ---- the tutor's marks over the screen ----
+
+    private MarksView marks;
+
+    /** Draws the page's marks (JSON, boxes on a 0-1000 grid over the whole screen) on top of everything. */
+    private void showMarks(String json) {
+        if (!attached) return;
+        Rect screen = wm.getCurrentWindowMetrics().getBounds();
+        boolean added = marks != null;
+        if (!added) marks = new MarksView(ctx);
+        if (marks.setMarks(json, screen.width(), screen.height()) == 0) {
+            clearMarks(true);
+            return;
+        }
+        if (!added) wm.addView(marks, marksParams());
+    }
+
+    /** Takes the marks away. tellPage: they went by themselves (you scrolled, say), so the page's button goes too. */
+    void clearMarks(boolean tellPage) {
+        if (marks == null) return;
+        try {
+            wm.removeView(marks);
+        } catch (RuntimeException ignored) {
+            // not added yet
+        }
+        marks = null;
+        if (tellPage) send("marks-cleared");
+    }
+
+    private WindowManager.LayoutParams marksParams() {
+        WindowManager.LayoutParams p = new WindowManager.LayoutParams();
+        p.type = WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY;
+        p.format = PixelFormat.TRANSLUCENT;
+        p.flags = WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+                | WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
+                | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
+                | WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS
+                | WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED;
+        p.setFitInsetsTypes(0);
+        p.layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS;
+        p.gravity = Gravity.TOP | Gravity.LEFT;
+        p.width = WindowManager.LayoutParams.MATCH_PARENT;
+        p.height = WindowManager.LayoutParams.MATCH_PARENT;
+        // Android 12+ only lets touches pass through another app's overlay that is at most this opaque.
+        float most = 0.8f;
+        if (Build.VERSION.SDK_INT >= 31) most = Math.min(most, ctx.getSystemService(InputManager.class).getMaximumObscuringOpacityForTouch());
+        p.alpha = most;
+        p.setTitle("Chalkside marks");
+        return p;
     }
 
     /** A message to the page: stop, blur, settings, screen-stopped or screen-started. */
@@ -230,11 +288,14 @@ final class Overlay {
         c.setSystemBars(bars.top, bars.bottom);
     }
 
-    /** Called when a new screen capture starts, so it knows where this window is. */
+    /** Called when a screen capture starts, so it knows where this window is. */
     void captureChanged() {
         update();
         ScreenCapture c = service.capture();
-        if (c != null) c.setActive(captureWanted);
+        if (c == null) return;
+        c.setActive(captureWanted);
+        // Scrolling or switching app moves what the marks were drawn on, so they go.
+        c.setOnScreenMoved(() -> main.post(() -> clearMarks(true)));
     }
 
     private void setMode(String m, int cssW, int cssH) {
@@ -425,6 +486,16 @@ final class Overlay {
         @JavascriptInterface
         public void stop() {
             main.post(service::stopAll);
+        }
+
+        @JavascriptInterface
+        public void showMarks(String json) {
+            main.post(() -> Overlay.this.showMarks(json));
+        }
+
+        @JavascriptInterface
+        public void clearMarks() {
+            main.post(() -> Overlay.this.clearMarks(false));
         }
     }
 }

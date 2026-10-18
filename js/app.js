@@ -783,6 +783,7 @@ const S = {
   screenSeq: -1, // the newest picture of the screen sent to the tutor (Android app)
   screenPaused: false,
   sharingFile: false, // pictures of a file are going to the tutor, so the screen waits
+  lastImage: '', // what the tutor saw last: 'screen' or a shared 'file' (Android app)
 };
 
 const sessionActive = () => S.phase !== 'idle';
@@ -1240,10 +1241,16 @@ const TOOLS = {
     return r.errors.length ? { ok: true, id: r.id, errors: r.errors } : { ok: true, id: r.id };
   },
   mark_student_work(a) {
+    if (SCREEN) return markScreen(a.marks);
     const n = page.addMarks(a.marks, S.lastFrameRect);
     return { ok: true, marks_drawn: n };
   },
   clear_marks() {
+    if (SCREEN) {
+      droid?.clearMarks();
+      showMarksButton(false);
+      return { ok: true };
+    }
     page.clearMarks();
     return { ok: true };
   },
@@ -1319,6 +1326,7 @@ function sendScreenFrame(force) {
   if (!S.live.send({ realtimeInput: { video: { data: frame.data, mimeType: 'image/jpeg' } } })) return false;
   S.screenSeq = frame.seq;
   S.lastFrameAt = now;
+  S.lastImage = 'screen';
   return true;
 }
 
@@ -1441,6 +1449,10 @@ function setupOverlay() {
     share.stop = true;
     $('#shareStop').hidden = true;
   });
+  $('#ovMarks').addEventListener('click', () => {
+    droid?.clearMarks();
+    showMarksButton(false);
+  });
   setOvMode('bubble');
 }
 
@@ -1523,6 +1535,7 @@ function overlayToast(message, { kind, actionLabel }) {
 function onNative(type) {
   if (type === 'stop') closeOverlay();
   else if (type === 'blur') document.activeElement?.blur?.(); // you tapped another app, or Back, while typing
+  else if (type === 'marks-cleared') showMarksButton(false); // you scrolled, switched app or turned the tablet
   else if (type === 'screen-started') {
     toast('The tutor can see your screen again.', { ms: 3000 });
     setTimeout(() => sendFrame({ force: true }), 1200);
@@ -1542,6 +1555,36 @@ function onNative(type) {
       toast('Saved. The tutor picks up the new settings next time you start.', { actionLabel: 'Restart now', onAction: restartSession, ms: 9000 });
     }
   }
+}
+
+// ---- the tutor's marks on the screen (Android app) ----------------------------------------------
+//
+// mark_student_work boxes are on a 0-1000 grid over the newest picture, which covers the
+// whole screen, so the app can draw them straight over whatever you're writing in.
+
+const VERDICTS = ['correct', 'mistake', 'check', 'note'];
+
+function markScreen(marks) {
+  if (!droid?.showMarks) throw new Error('marking the screen is not available in this version of the app');
+  if (S.lastImage !== 'screen') {
+    return { ok: false, error: "The newest image is a file the student shared, not their screen, so marks can't be drawn on it. Say what's wrong in words instead." };
+  }
+  const clean = (Array.isArray(marks) ? marks : [])
+    .map((m) => ({
+      box: (Array.isArray(m?.box_2d) ? m.box_2d : []).map(Number),
+      verdict: VERDICTS.includes(m?.verdict) ? m.verdict : 'note',
+      label: String(m?.label ?? '').trim().slice(0, 80),
+    }))
+    .filter((m) => m.box.length === 4 && m.box.every(Number.isFinite))
+    .slice(0, 12);
+  if (!clean.length) throw new Error('no usable box_2d values; send [ymin, xmin, ymax, xmax] from 0 to 1000');
+  droid.showMarks(JSON.stringify(clean));
+  showMarksButton(true);
+  return { ok: true, marks_drawn: clean.length };
+}
+
+function showMarksButton(on) {
+  $('#ovMarks').hidden = !on;
 }
 
 // ---- showing the tutor a file: a whole PDF, or a picture (Android app) -------------------------
@@ -1658,6 +1701,7 @@ async function sendPicture(data) {
     for (let tries = 0; tries < 20; tries++) {
       if (S.live?.send({ realtimeInput: { video: { data, mimeType: 'image/jpeg' } } })) {
         S.lastFrameAt = performance.now();
+        S.lastImage = 'file';
         return true;
       }
       if (S.phase !== 'reconnecting') return false;

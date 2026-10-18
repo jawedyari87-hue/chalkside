@@ -55,6 +55,9 @@ final class ScreenCapture {
     private volatile boolean active;
     private volatile Rect mask; // Chalkside's own floating window, in screen pixels
     private volatile int barTop, barBottom; // system bars, ignored when looking for changes
+    private volatile Runnable onMoved; // most of the screen changed at once (a scroll, another app)
+    // Share of the screen (outside Chalkside's window) that must change to count as moved.
+    private static final float MOVED = 0.35f;
 
     private final Object lock = new Object();
     private int seq;
@@ -104,6 +107,11 @@ final class ScreenCapture {
     void setSystemBars(int top, int bottom) {
         barTop = top;
         barBottom = bottom;
+    }
+
+    /** Runs on the capture thread when most of the screen changes at once, or the tablet turns. */
+    void setOnScreenMoved(Runnable r) {
+        onMoved = r;
     }
 
     /** The newest picture as JSON {seq, w, h, data}, or "" if there's none newer than {@code since} (-1: any). */
@@ -162,6 +170,8 @@ final class ScreenCapture {
         display.setSurface(reader.getSurface());
         old.close();
         lastSig = null;
+        Runnable moved = onMoved;
+        if (moved != null) moved.run();
     }
 
     private void onImage(ImageReader r) {
@@ -203,7 +213,17 @@ final class ScreenCapture {
             img.close();
         }
         int[] sig = signature(frame);
-        if (lastSig != null && !changed(lastSig, sig)) return;
+        if (lastSig != null) {
+            int changed = 0, counted = 0;
+            for (int i = 0; i < sig.length; i++) {
+                if (sig[i] < 0 || lastSig[i] < 0) continue; // under Chalkside's own window
+                counted++;
+                if (Math.abs(sig[i] - lastSig[i]) > SIG_CHANGE) changed++;
+            }
+            if (changed == 0) return;
+            Runnable moved = onMoved;
+            if (moved != null && counted > 0 && changed > counted * MOVED) moved.run();
+        }
         lastSig = sig;
         ByteArrayOutputStream out = new ByteArrayOutputStream(192 * 1024);
         frame.compress(Bitmap.CompressFormat.JPEG, JPEG_QUALITY, out);
@@ -259,14 +279,20 @@ final class ScreenCapture {
             int c = px[i];
             px[i] = (((c >> 16) & 0xFF) * 299 + ((c >> 8) & 0xFF) * 587 + (c & 0xFF) * 114) / 1000;
         }
-        return px;
-    }
-
-    private static boolean changed(int[] a, int[] b) {
-        for (int i = 0; i < a.length; i++) {
-            if (Math.abs(a[i] - b[i]) > SIG_CHANGE) return true;
+        // Cells under Chalkside's own window are left out (-1): opening the panel isn't a change.
+        Rect m = mask;
+        if (m != null && screenW > 0) {
+            float k = w / (float) screenW; // screen pixels to frame pixels
+            float cellW = w / (float) SIG_W, cellH = (h - top - bottom) / (float) SIG_H;
+            int c0 = Math.max(0, (int) Math.floor(m.left * k / cellW));
+            int c1 = Math.min(SIG_W - 1, (int) Math.ceil(m.right * k / cellW) - 1);
+            int r0 = Math.max(0, (int) Math.floor((m.top * k - top) / cellH));
+            int r1 = Math.min(SIG_H - 1, (int) Math.ceil((m.bottom * k - top) / cellH) - 1);
+            for (int r = r0; r <= r1; r++) {
+                for (int c = c0; c <= c1; c++) px[r * SIG_W + c] = -1;
+            }
         }
-        return false;
+        return px;
     }
 
     private void dropPending() {
