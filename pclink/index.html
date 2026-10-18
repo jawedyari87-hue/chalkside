@@ -38,6 +38,13 @@
   <h1>Chalkside PC link</h1>
   <p>Shows your tutor what's on this PC's screen, such as your lecture slides, alongside your tablet. The PC and tablet must be on the same Wi-Fi, with a lesson running in the Chalkside app.</p>
 
+  <div class="note" id="getFile" hidden>
+    <p><strong>First, put this page on your PC.</strong> Browsers don't let a website reach your tablet over Wi-Fi, so the PC link runs as a file on your PC.</p>
+    <p id="getFileSteps">Click <strong>Download</strong>, then open the file it saves. It opens in your browser, ready to use. Keep it somewhere handy, such as your desktop, for next time.</p>
+    <div class="buttons"><button type="button" id="download">Download</button></div>
+  </div>
+
+  <div id="link">
   <div class="fields">
     <label>Tablet address <input id="addr" placeholder="e.g. 192.168.1.23" autocomplete="off" spellcheck="false"></label>
     <label>Code <input id="code" placeholder="6 digits" inputmode="numeric" maxlength="6" autocomplete="off"></label>
@@ -49,19 +56,35 @@
     <button type="button" class="ghost" id="stop" hidden>Stop sharing</button>
   </div>
   <p id="status" role="status"></p>
-  <p class="note" id="webNote" hidden>If the address and Wi-Fi are right, your browser may be stopping this web page from reaching the tablet. Press <strong>Ctrl+S</strong> to save the page, then open the saved file in Chrome and try again.</p>
   <p class="dim">Choose the window with your slides, or the whole screen. Keep this tab open while you study (it can be in the background). The tutor gets a new picture only when something changes.</p>
   <canvas id="preview" hidden></canvas>
+  </div>
 </main>
 
 <script>
 (() => {
   const PORT = 8792;
   const MAX_SIDE = 1280; // sharper than the tablet's own pictures, for small text on slides
-  const ON_WEB = location.protocol === 'https:';
   const $ = (s) => document.querySelector(s);
   const addr = $('#addr'), code = $('#code'), status = $('#status'), preview = $('#preview');
-  const share = $('#share'), stopBtn = $('#stop'), webNote = $('#webNote');
+  const share = $('#share'), stopBtn = $('#stop');
+
+  // From the website (https), the browser blocks plain http to the tablet as mixed content,
+  // so offer this page as a file. Opened from a file, it can reach the tablet.
+  if (location.protocol === 'https:') {
+    $('#getFile').hidden = false;
+    $('#link').hidden = true;
+    $('#download').addEventListener('click', async () => {
+      const html = await fetch(location.href, { cache: 'no-store' }).then((r) => r.text());
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(new Blob([html], { type: 'text/html' }));
+      a.download = 'Chalkside PC link.html';
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(a.href), 60000);
+      $('#getFileSteps').innerHTML =
+        'Now open <strong>Chalkside PC link.html</strong> from your downloads (<strong>Ctrl+J</strong> lists them). Keep it somewhere handy, such as your desktop, for next time.';
+    });
+  }
   const store = (k, v) => {
     try {
       if (v === undefined) return localStorage.getItem(k);
@@ -90,17 +113,12 @@
 
   function call(path, init = {}) {
     const opts = { cache: 'no-store', ...init, headers: { 'X-Chalkside-Code': code.value.trim(), ...init.headers } };
-    // From a secure web page, newer Chrome can ask to reach a device on your Wi-Fi.
-    if (ON_WEB) opts.targetAddressSpace = 'local';
     return fetch(`http://${host()}${path}`, opts);
   }
 
   // A problem with the link, in words.
   function trouble(res) {
-    if (!res) {
-      if (ON_WEB) webNote.hidden = false;
-      return "Can't reach the tablet. Is a lesson running in Chalkside, and are both on the same Wi-Fi? Check the address too.";
-    }
+    if (!res) return "Can't reach the tablet. Is a lesson running in Chalkside, and are both on the same Wi-Fi? Check the address too.";
     if (res.status === 403) return "Wrong code. Check it on the Chalkside app's start screen.";
     if (res.status === 429) return 'Too many wrong codes: wait a minute, then try again.';
     return `The tablet said no (${res.status}).`;
@@ -111,9 +129,7 @@
     try {
       const res = await call('/hello');
       if (!res.ok) return { error: trouble(res) };
-      const seq = (await res.json()).seq;
-      webNote.hidden = true;
-      return { seq };
+      return { seq: (await res.json()).seq };
     } catch {
       return { error: trouble(null) };
     }

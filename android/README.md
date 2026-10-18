@@ -54,13 +54,13 @@ What the tutor sees: a picture of the whole screen about once a second, only whe
 For lecture slides on the PC while you write notes on the tablet:
 
 1. Put the PC and the tablet on the same Wi-Fi, and start a lesson on the tablet.
-2. On the PC, open **[jawedyari87-hue.github.io/chalkside/pclink](https://jawedyari87-hue.github.io/chalkside/pclink/)** in Chrome or Edge, or open `pclink/index.html` from this project.
+2. On the PC, open the PC link page as a file in Chrome or Edge. The first time, go to **[jawedyari87-hue.github.io/chalkside/pclink](https://jawedyari87-hue.github.io/chalkside/pclink/)**, click **Download** and open the file it saves; keep it on your desktop for next time. (Browsers block a website from reaching the tablet over plain http, but a page opened from a file can.) On a PC with this project, `pclink/index.html` is the same page.
 3. Type the **address** and **code** from the Chalkside start screen (under *Your PC's screen*), click **Share a screen or window**, and choose the window with your slides or the whole screen.
 
 The page sends a picture of what you shared, at most once a second and only when it has changed (moving the mouse doesn't count). The tutor gets these alongside your tablet's pictures, with a *PC screen* strip across the top so it can tell them apart. Ask about "the slide" or "my PC" and it looks at the newest PC picture. The bar shows **· PC** while the PC is linked. Keep the page open; its tab can be in the background, and its preview shows the last picture sent.
 
 - **Only during a lesson.** The tablet listens for the PC (on port 8792) only while a lesson runs, and only takes pictures that come with the code. **New code** on the start screen replaces the code; type the new one into the page. Ten wrong codes in a minute and the tablet stops listening to that computer until the minute is up.
-- **If the page can't reach the tablet**, check that both are on the same Wi-Fi and that the address is right. A browser may stop a web page from reaching devices on your Wi-Fi: save the page (**Ctrl+S**) and open the saved file instead. If Chrome asks to allow access to devices on your local network, allow it. Networks that keep devices apart, as eduroam and many university and public networks do, block the link completely. Home Wi-Fi or a phone hotspot works.
+- **If the page can't reach the tablet**, check that both are on the same Wi-Fi, that a lesson is running, and that the address is right. If the browser asks to allow access to devices on your local network, allow it. Networks that keep devices apart, as eduroam and many university and public networks do, block the link completely. Home Wi-Fi or a phone hotspot works.
 - The PC does the sending, so nothing on the PC accepts connections and Windows Firewall needs no changes.
 - The tutor's pen marks only go on the tablet. It describes things on the PC in words.
 - PC pictures are at most 1280 pixels on the long side, so small slide text stays readable.
