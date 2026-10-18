@@ -72,11 +72,10 @@ const CHECKING = {
   ],
 };
 
-// Pictures and web lookups, when the student allows them (settings.web).
+// Pictures from Wikipedia, when the student allows them (settings.web).
 const WEB_RULES = `
-PICTURES AND THE WEB
-- show_picture puts the main picture of a Wikipedia article into your notes and also sends it to you, so you can talk about it. Use it when a picture explains something better than words: a well-known diagram, figure or graph. For maths you can write or plot, use the board instead.
-- You can look things up with Google Search, to check a fact, a definition or a detail you are not sure of. Say briefly where you found it. Keep to what helps the student's studies, and never look up or show anything unsuitable for a study session.
+PICTURES
+- show_picture puts the main picture of a Wikipedia article into your notes and also sends it to you, so you can talk about it. Use it when a picture explains something better than words: a well-known diagram, figure or graph. For maths you can write or plot, use the board instead. Never show anything unsuitable for a study session.
 `;
 
 export function buildSystemPrompt(s, { screen = false } = {}) {
@@ -121,7 +120,7 @@ ${about ? `\nABOUT THE STUDENT (in their own words)\n${about}\n` : ''}`;
 const STR = { type: 'STRING' };
 
 // With screen: true (the Android app) the tutor marks the student's screen instead of their page.
-// With web: true it can also show Wikipedia pictures and use Google Search.
+// With web: true it can also show Wikipedia pictures.
 export function buildTools(profile, { screen = false, web = false } = {}) {
   const nb = profile.nonBlocking ? { behavior: 'NON_BLOCKING' } : {};
   const where = screen ? 'screen' : 'page';
@@ -246,7 +245,9 @@ export function buildTools(profile, { screen = false, web = false } = {}) {
         required: ['query'],
       },
     });
-    tools.push({ googleSearch: {} });
+    // No Google Search tool: on free keys it has its own small allowance, and once that is used
+    // up Google refuses the whole lesson with "You exceeded your current quota", even though the
+    // key itself still works (found 2026-10-18: the same key was accepted without it).
   }
   return tools;
 }

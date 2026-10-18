@@ -48,7 +48,7 @@ const DEFAULTS = {
   about: '',
   replySpeed: 'quick',
   noisy: false,
-  web: true, // Google Search, and pictures from Wikipedia
+  web: true, // pictures from Wikipedia
   autoSend: true,
   watch: true,
   layout: 'board-left',
