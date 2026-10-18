@@ -1016,6 +1016,7 @@ async function startSession(thenAsk = null) {
   try {
     await audio.openMic(); // before the speaker: see AudioEngine.openMic
     await audio.init();
+    audio.out.gain.value = voiceGain(); // the bar's quietest steps (see QUIET_GAINS)
     await audio.startMic(onMicChunk);
   } catch (err) {
     audio.stopMic();
@@ -1746,7 +1747,7 @@ function setupOverlay() {
   $('#ovVolume').hidden = typeof droid?.showVolume !== 'function';
   $('#ovVolume').addEventListener('click', toggleVolume);
   $('#ovVolumeRange').addEventListener('input', () => {
-    droid?.setVolume(Number($('#ovVolumeRange').value));
+    setVolumeStep(Number($('#ovVolumeRange').value));
     volumeTimer();
   });
   setOvMode('bubble');
@@ -1859,7 +1860,22 @@ function onNative(type) {
 // size. It sets the volume of whichever path the tutor's voice is on (call or media) and goes
 // away after a few seconds.
 
-const vol = { open: false, timer: 0, poll: 0 };
+const vol = { open: false, timer: 0, poll: 0, floor: 1 };
+
+// Quieter than Android goes: its lowest call volume can still be loud on a tablet, so the
+// slider's first steps keep Android at its quietest audible step and turn the tutor's voice
+// down inside Chalkside. Remembered between lessons.
+const QUIET_GAINS = [0.08, 0.15, 0.28, 0.5]; // the slider's first steps, quietest first
+
+function voiceGain() {
+  const g = Number(prefs.get('voiceGain', 1));
+  return g > 0 && g <= 1 ? g : 1;
+}
+
+function setVoiceGain(g) {
+  prefs.set('voiceGain', g);
+  if (audio.out) audio.out.gain.value = g;
+}
 
 function toggleVolume() {
   if (vol.open) return closeVolume();
@@ -1878,12 +1894,28 @@ function toggleVolume() {
 function syncVolume() {
   try {
     const v = JSON.parse(droid.volumeInfo());
+    vol.floor = Math.max(v.min, 1); // Android's quietest step that still makes a sound
     const r = $('#ovVolumeRange');
-    r.min = String(v.min);
-    r.max = String(v.max);
-    if (document.activeElement !== r) r.value = String(v.level);
+    r.min = '0';
+    r.max = String(QUIET_GAINS.length + v.max - vol.floor);
+    let g = voiceGain();
+    if (g < 1 && v.level > vol.floor) setVoiceGain((g = 1)); // the volume buttons turned it up past the quiet steps
+    if (document.activeElement !== r) {
+      r.value = String(g < 1 ? Math.max(0, QUIET_GAINS.findIndex((q) => q >= g - 1e-6)) : QUIET_GAINS.length + Math.max(0, v.level - vol.floor));
+    }
   } catch {
     closeVolume();
+  }
+}
+
+// A slider position: a quiet step (Android at its quietest, the voice turned down here) or an Android step.
+function setVolumeStep(p) {
+  if (p < QUIET_GAINS.length) {
+    droid?.setVolume(vol.floor);
+    setVoiceGain(QUIET_GAINS[p]);
+  } else {
+    setVoiceGain(1);
+    droid?.setVolume(vol.floor + p - QUIET_GAINS.length);
   }
 }
 
