@@ -11,6 +11,7 @@ import android.content.pm.ServiceInfo;
 import android.graphics.drawable.Icon;
 import android.media.AudioAttributes;
 import android.media.AudioManager;
+import android.media.AudioPlaybackConfiguration;
 import android.media.projection.MediaProjection;
 import android.media.projection.MediaProjectionManager;
 import android.media.session.MediaSession;
@@ -21,6 +22,8 @@ import android.os.IBinder;
 import android.os.Looper;
 import android.util.Log;
 import android.widget.Toast;
+
+import java.util.List;
 
 /**
  * Runs a lesson: a foreground service (screen capture and microphone) that holds the
@@ -52,28 +55,85 @@ public class TutorService extends Service {
 
     /**
      * While the tutor is live its microphone puts Android in call mode, where the volume buttons
-     * change the call volume. The tutor's voice plays as media, so a media session that says it's
-     * playing makes the buttons change the media volume instead.
+     * change the call volume. The tutor's voice comes out either as a call or as media, depending
+     * on when the WebView opened its speaker, and it can move between them. A media session that
+     * says it's playing, kept on whichever of the two the voice is using, sends the buttons there.
      */
     void setLessonLive(boolean live) {
+        AudioManager am = getSystemService(AudioManager.class);
         if (live && volumeKeys == null) {
             MediaSession s = new MediaSession(this, "Chalkside");
-            s.setPlaybackToLocal(new AudioAttributes.Builder()
-                    .setUsage(AudioAttributes.USAGE_MEDIA)
-                    .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
-                    .build());
+            s.setPlaybackToLocal(attributes(voiceUsage));
             s.setPlaybackState(new PlaybackState.Builder().setState(PlaybackState.STATE_PLAYING, 0, 1f).build());
             s.setActive(true);
             volumeKeys = s;
-            // With media volume at nought the tutor talks but nothing comes out.
-            if (getSystemService(AudioManager.class).getStreamVolume(AudioManager.STREAM_MUSIC) == 0) {
-                toast("Your media volume is off. Press volume up to hear the tutor.");
-            }
+            voiceWatch = new AudioManager.AudioPlaybackCallback() {
+                @Override
+                public void onPlaybackConfigChanged(List<AudioPlaybackConfiguration> configs) {
+                    followVoice(configs);
+                }
+            };
+            am.registerAudioPlaybackCallback(voiceWatch, main);
+            followVoice(am.getActivePlaybackConfigurations());
+            // By then the tutor has its speaker: if that volume is off, the tutor talks but nothing comes out.
+            main.postDelayed(this::warnIfSilent, 5000);
         } else if (!live && volumeKeys != null) {
+            am.unregisterAudioPlaybackCallback(voiceWatch);
+            voiceWatch = null;
             volumeKeys.setActive(false);
             volumeKeys.release();
             volumeKeys = null;
         }
+    }
+
+    private AudioManager.AudioPlaybackCallback voiceWatch;
+    private int voiceUsage = AudioAttributes.USAGE_MEDIA;
+
+    // Other apps' sounds are media too, so a voice-call player means the tutor's voice is on the call path.
+    private void followVoice(List<AudioPlaybackConfiguration> configs) {
+        int usage = AudioAttributes.USAGE_MEDIA;
+        for (AudioPlaybackConfiguration c : configs) {
+            if (c.getAudioAttributes().getUsage() == AudioAttributes.USAGE_VOICE_COMMUNICATION) usage = AudioAttributes.USAGE_VOICE_COMMUNICATION;
+        }
+        if (usage == voiceUsage) return;
+        voiceUsage = usage;
+        if (volumeKeys != null) volumeKeys.setPlaybackToLocal(attributes(usage));
+    }
+
+    private static AudioAttributes attributes(int usage) {
+        return new AudioAttributes.Builder().setUsage(usage).setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build();
+    }
+
+    int voiceStream() {
+        return voiceUsage == AudioAttributes.USAGE_VOICE_COMMUNICATION ? AudioManager.STREAM_VOICE_CALL : AudioManager.STREAM_MUSIC;
+    }
+
+    /** The tutor's volume for the bar's slider, as JSON {level, min, max}. */
+    String voiceVolume() {
+        AudioManager am = getSystemService(AudioManager.class);
+        int s = voiceStream();
+        return "{\"level\":" + am.getStreamVolume(s) + ",\"min\":" + am.getStreamMinVolume(s) + ",\"max\":" + am.getStreamMaxVolume(s) + "}";
+    }
+
+    void setVoiceVolume(int level) {
+        AudioManager am = getSystemService(AudioManager.class);
+        int s = voiceStream();
+        am.setStreamVolume(s, Math.max(am.getStreamMinVolume(s), Math.min(am.getStreamMaxVolume(s), level)), 0);
+    }
+
+    private void warnIfSilent() {
+        if (volumeKeys == null) return;
+        if (getSystemService(AudioManager.class).getStreamVolume(voiceStream()) == 0) {
+            toast("The tutor's volume is off. Tap the speaker button on the Chalkside bar to turn it up.");
+        }
+    }
+
+    /** The bar's speaker button: Android's volume slider for the tutor's voice, a notch up if it was off. */
+    void showVolume() {
+        AudioManager am = getSystemService(AudioManager.class);
+        int stream = voiceStream();
+        boolean off = am.getStreamVolume(stream) <= am.getStreamMinVolume(stream) && stream == AudioManager.STREAM_MUSIC;
+        am.adjustStreamVolume(stream, off ? AudioManager.ADJUST_RAISE : AudioManager.ADJUST_SAME, AudioManager.FLAG_SHOW_UI);
     }
 
     @Override

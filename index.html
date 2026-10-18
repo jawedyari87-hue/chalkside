@@ -32,6 +32,7 @@
   <symbol id="i-undo" viewBox="0 0 24 24"><path d="M9 14L4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/></symbol>
   <symbol id="i-redo" viewBox="0 0 24 24"><path d="M15 14l5-5-5-5"/><path d="M20 9H9.5a5.5 5.5 0 0 0 0 11H13"/></symbol>
   <symbol id="i-image" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="2"/><path d="M21 16l-5-5-9 9"/></symbol>
+  <symbol id="i-volume" viewBox="0 0 24 24"><path d="M4 9.5h3.5L12 5v14l-4.5-4.5H4z"/><path d="M15.5 9a4 4 0 0 1 0 6M18 6.5a7.5 7.5 0 0 1 0 11"/></symbol>
   <symbol id="i-clip" viewBox="0 0 24 24"><path d="M20.5 11.5l-8.2 8.2a5 5 0 0 1-7.1-7.1l8.6-8.6a3.4 3.4 0 0 1 4.8 4.8l-8.6 8.6a1.8 1.8 0 0 1-2.5-2.5l7.9-7.9"/></symbol>
   <symbol id="i-pdf" viewBox="0 0 24 24"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M9 13h6M9 17h4"/></symbol>
   <symbol id="i-unmark" viewBox="0 0 24 24"><path d="M3.5 12.5l3.5 3.5 7-8.5"/><path d="M15 15l5 5M20 15l-5 5"/></symbol>
@@ -55,8 +56,14 @@
 <div class="app" id="app" data-layout="board-left">
   <!-- The Android app's floating bar (?overlay). The live controls move in here when it starts. -->
   <div class="ov-bar" id="ovBar" hidden>
+    <!-- Stands in for the status while you set the tutor's volume. -->
+    <label class="ov-volume" id="ovVolumeRow" hidden>
+      <svg class="ic" aria-hidden="true"><use href="#i-volume"/></svg>
+      <input type="range" id="ovVolumeRange" min="0" max="15" step="1" aria-label="The tutor's volume">
+    </label>
     <div class="ov-bar__tools" id="ovTools">
       <button type="button" class="ov-btn" id="ovMarks" aria-label="Remove the tutor's marks from your screen" hidden><svg class="ic"><use href="#i-unmark"/></svg></button>
+      <button type="button" class="ov-btn" id="ovVolume" aria-label="The tutor's volume" hidden><svg class="ic"><use href="#i-volume"/></svg></button>
       <button type="button" class="ov-btn" id="ovEye" aria-pressed="true" aria-label="Hide your screen from the tutor">
         <svg class="ic ov-eye-on"><use href="#i-eye"/></svg><svg class="ic ov-eye-off"><use href="#i-eye-off"/></svg>
       </button>

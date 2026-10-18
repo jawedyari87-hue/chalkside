@@ -886,9 +886,11 @@ async function startSession(thenAsk = null) {
   S.profile = modelProfile(settings);
   setPhase('connecting');
   try {
+    await audio.openMic(); // before the speaker: see AudioEngine.openMic
     await audio.init();
     await audio.startMic(onMicChunk);
   } catch (err) {
+    audio.stopMic();
     setPhase('idle');
     toast(micError(err), { kind: 'error', ms: 10000 });
     return;
@@ -1533,6 +1535,13 @@ function setupOverlay() {
     droid?.clearMarks();
     showMarksButton(false);
   });
+  // The tutor's volume (older versions of the app don't have it, or only Android's own slider).
+  $('#ovVolume').hidden = typeof droid?.showVolume !== 'function';
+  $('#ovVolume').addEventListener('click', toggleVolume);
+  $('#ovVolumeRange').addEventListener('input', () => {
+    droid?.setVolume(Number($('#ovVolumeRange').value));
+    volumeTimer();
+  });
   setOvMode('bubble');
 }
 
@@ -1635,6 +1644,56 @@ function onNative(type) {
       toast('Saved. The tutor picks up the new settings next time you start.', { actionLabel: 'Restart now', onAction: restartSession, ms: 9000 });
     }
   }
+}
+
+// ---- the tutor's volume (Android app) -----------------------------------------------------------
+//
+// The speaker button swaps the status for a slider, the same width so the window keeps its
+// size. It sets the volume of whichever path the tutor's voice is on (call or media) and goes
+// away after a few seconds.
+
+const vol = { open: false, timer: 0, poll: 0 };
+
+function toggleVolume() {
+  if (vol.open) return closeVolume();
+  if (typeof droid?.volumeInfo !== 'function') return droid?.showVolume(); // an older app: Android's slider
+  vol.open = true;
+  $('#ovVolumeRow').style.width = `${Math.max(200, Math.round(sessionEl.getBoundingClientRect().width))}px`;
+  $('#ovVolumeRow').hidden = false;
+  ovBar.classList.add('is-volume');
+  $('#ovVolume').setAttribute('aria-pressed', 'true');
+  droid.setDraggable(false); // so dragging the slider doesn't move the window
+  syncVolume();
+  vol.poll = setInterval(syncVolume, 600); // the volume buttons may move it too
+  volumeTimer();
+}
+
+function syncVolume() {
+  try {
+    const v = JSON.parse(droid.volumeInfo());
+    const r = $('#ovVolumeRange');
+    r.min = String(v.min);
+    r.max = String(v.max);
+    if (document.activeElement !== r) r.value = String(v.level);
+  } catch {
+    closeVolume();
+  }
+}
+
+function volumeTimer() {
+  clearTimeout(vol.timer);
+  vol.timer = setTimeout(closeVolume, 4000);
+}
+
+function closeVolume() {
+  if (!vol.open) return;
+  vol.open = false;
+  clearInterval(vol.poll);
+  clearTimeout(vol.timer);
+  ovBar.classList.remove('is-volume');
+  $('#ovVolumeRow').hidden = true;
+  $('#ovVolume').setAttribute('aria-pressed', 'false');
+  droid?.setDraggable(true);
 }
 
 // ---- the tutor's marks on the screen (Android app) ----------------------------------------------

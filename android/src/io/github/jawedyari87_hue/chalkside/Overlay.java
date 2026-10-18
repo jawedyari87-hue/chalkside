@@ -52,6 +52,7 @@ final class Overlay {
     private int bubbleW, bubbleH;
     private boolean attached, focusable, keepOn;
     private volatile boolean captureWanted;
+    private volatile boolean draggable = true;
 
     Overlay(TutorService service) {
         this.service = service;
@@ -384,7 +385,7 @@ final class Overlay {
                     startX = lp.x;
                     startY = lp.y;
                     dragging = false;
-                    canDrag = mode == BUBBLE || e.getY() < dp(PANEL_HANDLE_DP);
+                    canDrag = draggable && (mode == BUBBLE || e.getY() < dp(PANEL_HANDLE_DP));
                     return false;
                 case MotionEvent.ACTION_MOVE:
                     if (canDrag && !dragging && Math.hypot(e.getRawX() - downX, e.getRawY() - downY) > slop) {
@@ -486,6 +487,27 @@ final class Overlay {
         @JavascriptInterface
         public void stop() {
             main.post(service::stopAll);
+        }
+
+        @JavascriptInterface
+        public void showVolume() {
+            main.post(service::showVolume);
+        }
+
+        @JavascriptInterface
+        public String volumeInfo() {
+            return service.voiceVolume();
+        }
+
+        @JavascriptInterface
+        public void setVolume(int level) {
+            main.post(() -> service.setVoiceVolume(level));
+        }
+
+        // Off while you use the volume slider, so dragging it doesn't move the window.
+        @JavascriptInterface
+        public void setDraggable(boolean on) {
+            draggable = on;
         }
 
         @JavascriptInterface

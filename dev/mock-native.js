@@ -62,6 +62,13 @@ export function installMockNative() {
       log('clearMarks');
       state.marks = [];
     },
+    showVolume: () => log('showVolume'),
+    volumeInfo: () => JSON.stringify({ level: state.volume ?? 5, min: 1, max: 15 }),
+    setVolume(level) {
+      log('setVolume', level);
+      state.volume = level;
+    },
+    setDraggable: (on) => log('setDraggable', on),
     openSettings: () => log('openSettings'),
     settingsClosed: (hasKey) => log('settingsClosed', hasKey),
     stop: () => log('stop'),

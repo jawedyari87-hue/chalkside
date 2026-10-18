@@ -646,6 +646,11 @@ html.is-overlay, html.is-overlay body { background: transparent; }
 .ov-btn:active { background: rgba(237, 241, 231, 0.14); }
 .ov-btn .ic { width: 22px; height: 22px; }
 .ov-eye-off, .ov-collapse { display: none; }
+.ov-volume { display: flex; align-items: center; gap: 10px; padding: 0 6px 0 4px; color: var(--chalk); }
+.ov-volume input { flex: 1; min-width: 0; height: 44px; accent-color: var(--accent); }
+.ov-bar.is-volume .session { display: none; }
+.ov-bar:not(.is-volume) .ov-volume { display: none; }
+#ovVolume[aria-pressed="true"] { background: rgba(237, 241, 231, 0.14); }
 #ovEye[aria-pressed="false"] { color: var(--chalk-pink); }
 #ovEye[aria-pressed="false"] .ov-eye-on, #ovExpand[aria-expanded="true"] .ov-expand { display: none; }
 #ovEye[aria-pressed="false"] .ov-eye-off, #ovExpand[aria-expanded="true"] .ov-collapse { display: block; }

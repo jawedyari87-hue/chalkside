@@ -91,14 +91,22 @@ export class AudioEngine extends EventTarget {
     await resumed;
   }
 
-  async startMic(onChunk) {
-    this.stopMic();
+  // Call before init(). On Android the microphone switches the audio to "call" mode (for echo
+  // cancelling); opening it first means the tutor's voice uses the call path from the start,
+  // rather than moving there part-way through a lesson at a different volume.
+  async openMic() {
+    if (this.stream) return;
     if (!navigator.mediaDevices?.getUserMedia) {
       throw Object.assign(new Error('This browser cannot use the microphone here.'), { name: 'NotSupportedError' });
     }
     this.stream = await navigator.mediaDevices.getUserMedia({
       audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true, channelCount: 1 },
     });
+  }
+
+  async startMic(onChunk) {
+    this.disconnectMic();
+    await this.openMic();
     this.src = this.ctx.createMediaStreamSource(this.stream);
     this.node = new AudioWorkletNode(this.ctx, 'pcm16-capture', {
       // 40 ms chunks: smaller pieces reach Gemini sooner, so it notices you've stopped talking sooner.
@@ -118,7 +126,7 @@ export class AudioEngine extends EventTarget {
     track?.addEventListener('ended', () => this.dispatchEvent(new Event('mic-ended')));
   }
 
-  stopMic() {
+  disconnectMic() {
     try {
       this.src?.disconnect();
       this.node?.disconnect();
@@ -127,9 +135,13 @@ export class AudioEngine extends EventTarget {
       /* already disconnected */
     }
     if (this.node) this.node.port.onmessage = null;
+    this.src = this.node = this.sink = null;
+  }
+
+  stopMic() {
+    this.disconnectMic();
     this.stream?.getTracks().forEach((t) => t.stop());
     this.stream = null;
-    this.src = this.node = this.sink = null;
   }
 
   // Queue a chunk of 16-bit mono PCM for gapless playback.

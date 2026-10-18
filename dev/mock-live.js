@@ -275,7 +275,8 @@ export function installMock() {
   };
 
   // A quiet synthetic microphone, so the capture pipeline runs without a real one.
-  if (navigator.mediaDevices) {
+  // ?mock&realmic keeps the real microphone, to test audio routing on a device without using Gemini.
+  if (navigator.mediaDevices && !new URLSearchParams(location.search).has('realmic')) {
     const real = navigator.mediaDevices.getUserMedia?.bind(navigator.mediaDevices);
     navigator.mediaDevices.getUserMedia = async (constraints) => {
       if (!constraints?.audio) return real(constraints);
