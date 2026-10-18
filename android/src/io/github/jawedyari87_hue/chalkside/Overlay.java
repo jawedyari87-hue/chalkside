@@ -489,6 +489,19 @@ final class Overlay {
             main.post(service::stopAll);
         }
 
+        /** The newest picture of your PC's screen, like frame() for the tablet's. */
+        @JavascriptInterface
+        public String pcFrame(int since) {
+            PcLink p = service.pcLink();
+            return p == null ? "" : p.frame(since);
+        }
+
+        @JavascriptInterface
+        public boolean pcLinked() {
+            PcLink p = service.pcLink();
+            return p != null && p.linked();
+        }
+
         @JavascriptInterface
         public void showVolume() {
             main.post(service::showVolume);

@@ -45,7 +45,7 @@ Tips:
 
 ## The Android app: the tutor sees your whole screen
 
-The `android` folder holds a small Android app for the Galaxy Tab. It lets the tutor see whatever is on screen: lecture PDFs, Samsung Notes, websites. It talks you through it while a floating bar, which opens into a notes panel, shows everything it says and writes. It loads this site in an overlay mode (`?overlay`), so it uses the same tutor, settings and lessons code. See [android/README.md](android/README.md) to build and install it.
+The `android` folder holds a small Android app for the Galaxy Tab. It lets the tutor see whatever is on screen: lecture PDFs, Samsung Notes, websites. It talks you through it while a floating bar, which opens into a notes panel, shows everything it says and writes. It loads this site in an overlay mode (`?overlay`), so it uses the same tutor, settings and lessons code. During a lesson the tutor can see your PC's screen too, such as lecture slides, through the PC link page (`pclink/`). See [android/README.md](android/README.md) to build and install it.
 
 ## Models
 

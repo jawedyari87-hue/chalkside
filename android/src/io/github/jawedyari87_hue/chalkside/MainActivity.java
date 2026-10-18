@@ -220,6 +220,16 @@ public class MainActivity extends Activity {
         }
         checklist.addView(row("Gemini API key", "Your free key from aistudio.google.com/apikey.", App.hasKey(this),
                 "Add key", this::openSettings));
+        String address = PcLink.address(this);
+        checklist.addView(row("Your PC's screen (optional)",
+                address == null
+                        ? "To show the tutor your PC too, connect the tablet to the same Wi-Fi as the PC."
+                        : "To show the tutor your PC too, open jawedyari87-hue.github.io/chalkside/pclink on the PC and enter address "
+                                + address + " and code " + PcLink.code(this) + ". It works while a lesson is running.",
+                false, "New code", () -> {
+                    PcLink.newCode(this);
+                    refresh();
+                }));
 
         boolean running = TutorService.running;
         startBtn.setText(running ? "End lesson" : "Start lesson");

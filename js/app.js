@@ -789,7 +789,9 @@ const S = {
   screenSeq: -1, // the newest picture of the screen sent to the tutor (Android app)
   screenPaused: false,
   sharingFile: false, // pictures of a file are going to the tutor, so the screen waits
-  lastImage: '', // what the tutor saw last: 'screen' or a shared 'file' (Android app)
+  lastImage: '', // what the tutor saw last: 'screen', 'pc' or a shared 'file' (Android app)
+  pcSeq: -1, // the newest picture of a linked PC sent to the tutor
+  preferPc: false, // the PC's turn next, when both screens have something new
   sources: null, // this answer's line of web sources in the notes
 };
 
@@ -1024,7 +1026,8 @@ function startTimer() {
   stopTimer();
   const tick = () => {
     const label = S.profile ? S.profile.label : '';
-    statusMeta.textContent = `${fmtClock((Date.now() - S.startedAt) / 1000)}${label ? ' · ' + label : ''}`;
+    const pc = SCREEN && typeof droid?.pcLinked === 'function' && droid.pcLinked() ? ' · PC' : ''; // your PC is linked
+    statusMeta.textContent = `${fmtClock((Date.now() - S.startedAt) / 1000)}${label ? ' · ' + label : ''}${pc}`;
   };
   tick();
   S.timer = setInterval(tick, 1000);
@@ -1392,24 +1395,37 @@ const frameRetry = debounce(() => sendFrame(), 1100);
 const frameSoon = debounce(() => sendFrame(), 1000, 4000);
 
 // The Android app captures the screen and only has a new picture when something on it
-// has changed. force sends the newest one again, for when the last was a while ago.
+// has changed. force sends the tablet's newest one again, for when the last was a while ago.
+// A linked PC sends pictures too: when both have something new they take turns.
 function sendScreenFrame(force) {
   if (!droid || S.screenPaused || S.sharingFile) return false;
   const now = performance.now();
   if (now - S.lastFrameAt < 900) return false; // the app makes at most one a second; this allows for timer jitter
-  let frame = null;
-  try {
-    const raw = droid.frame(force ? -1 : S.screenSeq);
-    if (raw) frame = JSON.parse(raw);
-  } catch {
-    return false;
+  const order = S.preferPc && !force ? ['pc', 'tablet'] : ['tablet', 'pc'];
+  for (const source of order) {
+    const frame = newestPicture(source, force && source === 'tablet');
+    if (!frame) continue;
+    if (!S.live.send({ realtimeInput: { video: { data: frame.data, mimeType: 'image/jpeg' } } })) return false;
+    if (source === 'pc') S.pcSeq = frame.seq;
+    else S.screenSeq = frame.seq;
+    S.lastFrameAt = now;
+    S.lastImage = source === 'pc' ? 'pc' : 'screen';
+    S.preferPc = source !== 'pc';
+    return true;
   }
-  if (!frame?.data) return false;
-  if (!S.live.send({ realtimeInput: { video: { data: frame.data, mimeType: 'image/jpeg' } } })) return false;
-  S.screenSeq = frame.seq;
-  S.lastFrameAt = now;
-  S.lastImage = 'screen';
-  return true;
+  return false;
+}
+
+function newestPicture(source, force) {
+  try {
+    let raw = '';
+    if (source === 'pc') raw = typeof droid.pcFrame === 'function' ? droid.pcFrame(S.pcSeq) : '';
+    else raw = droid.frame(force ? -1 : S.screenSeq);
+    const frame = raw ? JSON.parse(raw) : null;
+    return frame?.data ? frame : null;
+  } catch {
+    return null;
+  }
 }
 
 // Make sure the tutor has the current page before a question about it. forceScreen: the
@@ -1475,7 +1491,8 @@ async function ask(what) {
     toast('One moment, the tutor is reconnecting.', { ms: 2500 });
     return;
   }
-  await freshFrame(what === 'screen');
+  // Asks about the screen or your working want the tablet's newest picture, not a shared file or the PC.
+  await freshFrame(what === 'screen' || what === 'check');
   sendUserText(asks[what] || what);
 }
 
@@ -1705,7 +1722,13 @@ const VERDICTS = ['correct', 'mistake', 'check', 'note'];
 
 function markScreen(marks) {
   if (!droid?.showMarks) throw new Error('marking the screen is not available in this version of the app');
-  if (S.lastImage !== 'screen') {
+  if (S.lastImage === 'pc') {
+    // A PC picture came after the tablet's. The tablet picture is still right if the tablet hasn't changed since.
+    if (newestPicture('tablet', false)) {
+      sendScreenFrame(true);
+      return { ok: false, error: "The student's tablet screen has changed since your last picture of it. Look at the newest tablet picture (the one without a PC screen strip), then mark again." };
+    }
+  } else if (S.lastImage !== 'screen') {
     return { ok: false, error: "The newest image is a file the student shared, not their screen, so marks can't be drawn on it. Say what's wrong in words instead." };
   }
   const clean = (Array.isArray(marks) ? marks : [])

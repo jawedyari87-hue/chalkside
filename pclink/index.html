@@ -1,0 +1,313 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Chalkside PC link</title>
+<!--
+  Shows the Chalkside tutor on your tablet what's on this PC's screen (lecture slides, say),
+  alongside the tablet's own screen. Self-contained, so it also works saved as a file.
+  It sends a picture of the shared screen or window, at most once a second and only when it
+  has changed, to the Chalkside app on the tablet over your Wi-Fi (port 8792, with the app's code).
+-->
+<style>
+  :root { --slate: #213a33; --chalk: #edf1e7; --dim: #a8b8ae; --accent: #5fb39a; --ink: #0d1a15; --bad: #ff8b7e; color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body { margin: 0; min-height: 100vh; background: var(--slate); color: var(--chalk); font: 16px/1.5 system-ui, "Segoe UI", sans-serif; }
+  main { max-width: 640px; margin: 0 auto; padding: 32px 20px 48px; }
+  h1 { margin: 0 0 4px; font-size: 28px; }
+  p { margin: 8px 0; }
+  .dim { color: var(--dim); font-size: 15px; }
+  .fields { display: grid; grid-template-columns: 1fr 160px; gap: 12px; margin: 22px 0 8px; }
+  label { display: grid; gap: 6px; font-weight: 600; min-width: 0; }
+  input { width: 100%; height: 46px; padding: 0 12px; border-radius: 10px; border: 1px solid rgba(237, 241, 231, 0.3); background: rgba(0, 0, 0, 0.25); color: var(--chalk); font: inherit; }
+  .buttons { display: flex; gap: 10px; margin: 18px 0 10px; flex-wrap: wrap; }
+  button { height: 48px; padding: 0 22px; border: 0; border-radius: 24px; background: var(--accent); color: var(--ink); font: 700 16px system-ui, sans-serif; cursor: pointer; }
+  button.ghost { background: transparent; color: var(--chalk); border: 1px solid rgba(237, 241, 231, 0.4); }
+  button:disabled { opacity: 0.5; cursor: default; }
+  #status { min-height: 1.5em; font-weight: 600; }
+  #status.bad { color: var(--bad); }
+  #preview { display: block; width: 100%; margin-top: 16px; border-radius: 10px; background: rgba(0, 0, 0, 0.25); }
+  .note { padding: 12px 14px; border-radius: 10px; background: rgba(255, 139, 126, 0.15); }
+  [hidden] { display: none !important; }
+  @media (max-width: 480px) { .fields { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<main>
+  <h1>Chalkside PC link</h1>
+  <p>Shows your tutor what's on this PC's screen, such as your lecture slides, alongside your tablet. The PC and tablet must be on the same Wi-Fi, with a lesson running in the Chalkside app.</p>
+
+  <div class="fields">
+    <label>Tablet address <input id="addr" placeholder="e.g. 192.168.1.23" autocomplete="off" spellcheck="false"></label>
+    <label>Code <input id="code" placeholder="6 digits" inputmode="numeric" maxlength="6" autocomplete="off"></label>
+  </div>
+  <p class="dim">Both are on the Chalkside app's start screen, under "Your PC's screen".</p>
+
+  <div class="buttons">
+    <button type="button" id="share">Share a screen or window</button>
+    <button type="button" class="ghost" id="stop" hidden>Stop sharing</button>
+  </div>
+  <p id="status" role="status"></p>
+  <p class="note" id="webNote" hidden>If the address and Wi-Fi are right, your browser may be stopping this web page from reaching the tablet. Press <strong>Ctrl+S</strong> to save the page, then open the saved file in Chrome and try again.</p>
+  <p class="dim">Choose the window with your slides, or the whole screen. Keep this tab open while you study (it can be in the background). The tutor gets a new picture only when something changes.</p>
+  <canvas id="preview" hidden></canvas>
+</main>
+
+<script>
+(() => {
+  const PORT = 8792;
+  const MAX_SIDE = 1280; // sharper than the tablet's own pictures, for small text on slides
+  const ON_WEB = location.protocol === 'https:';
+  const $ = (s) => document.querySelector(s);
+  const addr = $('#addr'), code = $('#code'), status = $('#status'), preview = $('#preview');
+  const share = $('#share'), stopBtn = $('#stop'), webNote = $('#webNote');
+  const store = (k, v) => {
+    try {
+      if (v === undefined) return localStorage.getItem(k);
+      localStorage.setItem(k, v);
+    } catch {}
+    return v;
+  };
+  addr.value = store('chalkside-pc:addr') || '';
+  code.value = store('chalkside-pc:code') || '';
+
+  let stream = null, screen = null, ticker = null, busy = false, tick = 0;
+  let prevSig = null, sentSig = null, sentAt = 0;
+
+  const say = (text, bad = false) => {
+    status.textContent = text;
+    status.classList.toggle('bad', bad);
+  };
+  const linked = () =>
+    say(sentAt ? `Linked: the tutor can see this screen. Newest picture sent at ${new Date(sentAt).toLocaleTimeString('en-GB')}.` : 'Linked: sending the first picture…');
+
+  // "192.168.1.23", or a pasted "http://192.168.1.23:8792/", as host:port.
+  function host() {
+    const h = addr.value.trim().replace(/^https?:\/\//i, '').replace(/\/.*$/, '');
+    return /:\d+$/.test(h) ? h : `${h}:${PORT}`;
+  }
+
+  function call(path, init = {}) {
+    const opts = { cache: 'no-store', ...init, headers: { 'X-Chalkside-Code': code.value.trim(), ...init.headers } };
+    // From a secure web page, newer Chrome can ask to reach a device on your Wi-Fi.
+    if (ON_WEB) opts.targetAddressSpace = 'local';
+    return fetch(`http://${host()}${path}`, opts);
+  }
+
+  // A problem with the link, in words.
+  function trouble(res) {
+    if (!res) {
+      if (ON_WEB) webNote.hidden = false;
+      return "Can't reach the tablet. Is a lesson running in Chalkside, and are both on the same Wi-Fi? Check the address too.";
+    }
+    if (res.status === 403) return "Wrong code. Check it on the Chalkside app's start screen.";
+    if (res.status === 429) return 'Too many wrong codes: wait a minute, then try again.';
+    return `The tablet said no (${res.status}).`;
+  }
+
+  // The number of pictures the tablet has from this PC in the current lesson.
+  async function hello() {
+    try {
+      const res = await call('/hello');
+      if (!res.ok) return { error: trouble(res) };
+      const seq = (await res.json()).seq;
+      webNote.hidden = true;
+      return { seq };
+    } catch {
+      return { error: trouble(null) };
+    }
+  }
+
+  // A worker's timer keeps a steady beat when this tab is in the background; the page's own slows down.
+  function startTicker(fn) {
+    try {
+      const src = 'setInterval(() => postMessage(0), 1000);';
+      const w = new Worker(URL.createObjectURL(new Blob([src], { type: 'text/javascript' })));
+      w.onmessage = fn;
+      return { stop: () => w.terminate() };
+    } catch {
+      const id = setInterval(fn, 1000);
+      return { stop: () => clearInterval(id) };
+    }
+  }
+
+  // Keeps the newest picture of the shared screen: get() gives {img, w, h}, or null before the first.
+  // MediaStreamTrackProcessor hands over every frame even while this tab is in the background,
+  // whatever the browser does about drawing it; a <video> is the fallback.
+  function follow(track) {
+    if (typeof MediaStreamTrackProcessor === 'function') {
+      try {
+        const reader = new MediaStreamTrackProcessor({ track }).readable.getReader();
+        let frame = null, stopped = false;
+        (async () => {
+          for (;;) {
+            const { value, done } = await reader.read();
+            if (done) break;
+            if (stopped) {
+              value.close();
+              break;
+            }
+            frame?.close();
+            frame = value;
+          }
+        })().catch(() => {});
+        return {
+          get: () => frame && { img: frame, w: frame.displayWidth, h: frame.displayHeight },
+          stop() {
+            stopped = true;
+            reader.cancel().catch(() => {});
+            frame?.close();
+            frame = null;
+          },
+        };
+      } catch {}
+    }
+    const video = document.createElement('video');
+    video.muted = true;
+    video.playsInline = true;
+    video.srcObject = new MediaStream([track]);
+    video.play().catch(() => {});
+    return {
+      get: () => (video.readyState >= 2 && video.videoWidth ? { img: video, w: video.videoWidth, h: video.videoHeight } : null),
+      stop: () => (video.srcObject = null),
+    };
+  }
+
+  // A 32 x 20 grid of average brightness, to tell whether anything on the screen has changed.
+  // Each cell averages 20 x 20 pixels of a 640 x 400 copy: shrinking straight to 32 x 20 would
+  // look at a few pixels per cell and miss small changes, like the next line of a slide.
+  const GRID_W = 32, GRID_H = 20, CELL = 20;
+  const small = document.createElement('canvas');
+  small.width = GRID_W * CELL;
+  small.height = GRID_H * CELL;
+  const smallG = small.getContext('2d', { willReadFrequently: true });
+  smallG.imageSmoothingQuality = 'high';
+  function signature(img) {
+    smallG.drawImage(img, 0, 0, small.width, small.height);
+    const d = smallG.getImageData(0, 0, small.width, small.height).data;
+    const sums = new Float32Array(GRID_W * GRID_H);
+    for (let y = 0; y < small.height; y++) {
+      const row = ((y / CELL) | 0) * GRID_W;
+      for (let x = 0; x < small.width; x++) {
+        const i = (y * small.width + x) * 4;
+        sums[row + ((x / CELL) | 0)] += d[i] * 0.299 + d[i + 1] * 0.587 + d[i + 2] * 0.114;
+      }
+    }
+    return sums.map((s) => s / (CELL * CELL));
+  }
+  // How much two grids differ, summed over the cells. The mouse pointer moving somewhere else
+  // comes to about 13; a few changed numbers on a slide, 50; the next slide, hundreds.
+  const CHANGED = 20;
+  function differs(a, b) {
+    let sum = 0;
+    for (let i = 0; i < a.length; i++) sum += Math.abs(a[i] - b[i]);
+    return sum >= CHANGED;
+  }
+
+  async function onTick() {
+    if (busy || !stream) return;
+    busy = true;
+    try {
+      await step();
+    } finally {
+      busy = false;
+    }
+  }
+
+  async function step() {
+    // Every few seconds, check the link, and whether the tablet needs the picture again (a new lesson).
+    if (tick++ % 5 === 0) {
+      const h = await hello();
+      if (h.error) return say(h.error, true);
+      if (h.seq === 0) sentSig = null;
+      if (status.classList.contains('bad')) linked();
+    }
+    const shot = screen?.get();
+    if (!shot) return;
+    const sig = signature(shot.img);
+    const settled = prevSig && !differs(prevSig, sig);
+    prevSig = sig;
+    if (sentSig && !differs(sentSig, sig)) return; // the tutor has this already
+    // Wait for slides to finish changing or a page to stop scrolling, but not for ever (a video, say).
+    if (sentSig && !settled && Date.now() - sentAt < 6000) return;
+    const scale = Math.min(1, MAX_SIDE / Math.max(shot.w, shot.h));
+    preview.width = Math.round(shot.w * scale);
+    preview.height = Math.round(shot.h * scale);
+    const g = preview.getContext('2d');
+    g.imageSmoothingQuality = 'high'; // keeps small text readable when a big screen shrinks
+    g.drawImage(shot.img, 0, 0, preview.width, preview.height);
+    preview.hidden = false;
+    const blob = await new Promise((r) => preview.toBlob(r, 'image/jpeg', 0.8));
+    if (!blob || !stream) return;
+    try {
+      const res = await call('/frame', { method: 'POST', headers: { 'Content-Type': 'image/jpeg' }, body: blob });
+      if (!res.ok) return say(trouble(res), true);
+      sentSig = sig;
+      sentAt = Date.now();
+      linked();
+    } catch {
+      say(trouble(null), true);
+    }
+  }
+
+  async function start() {
+    const a = addr.value.trim(), c = code.value.trim();
+    store('chalkside-pc:addr', a);
+    store('chalkside-pc:code', c);
+    if (!a || !/^\d{6}$/.test(c)) return say('Enter the tablet address and the 6-digit code first.', true);
+    if (!navigator.mediaDevices?.getDisplayMedia) return say("This browser can't share a screen. Use Chrome or Edge.", true);
+    share.disabled = true;
+    say('Checking the link…');
+    const h = await hello();
+    if (h.error) {
+      share.disabled = false;
+      return say(h.error, true);
+    }
+    try {
+      stream = await navigator.mediaDevices.getDisplayMedia({
+        video: { frameRate: { max: 5 } },
+        audio: false,
+        selfBrowserSurface: 'exclude', // not this page itself
+      });
+    } catch {
+      share.disabled = false;
+      return say('Sharing was cancelled.', true);
+    }
+    const track = stream.getVideoTracks()[0];
+    track.addEventListener('ended', stop); // Chrome's own "Stop sharing" button
+    screen = follow(track);
+    prevSig = sentSig = null;
+    sentAt = 0;
+    tick = 0;
+    ticker = startTicker(onTick);
+    share.disabled = false;
+    share.hidden = true;
+    stopBtn.hidden = false;
+    linked();
+  }
+
+  function stop() {
+    if (!stream) return;
+    ticker?.stop();
+    ticker = null;
+    screen?.stop();
+    screen = null;
+    stream.getTracks().forEach((t) => t.stop());
+    stream = null;
+    share.hidden = false;
+    stopBtn.hidden = true;
+    say('Stopped. The tutor no longer sees this PC.');
+  }
+
+  share.addEventListener('click', start);
+  stopBtn.addEventListener('click', stop);
+  addr.addEventListener('change', () => store('chalkside-pc:addr', addr.value.trim()));
+  code.addEventListener('change', () => store('chalkside-pc:code', code.value.trim()));
+  code.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !stream) start();
+  });
+})();
+</script>
+</body>
+</html>

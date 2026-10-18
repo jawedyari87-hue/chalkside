@@ -57,7 +57,7 @@ const SURFACES = {
 2. YOUR BOARD. A whiteboard next to their page. The only way to show maths is the write_on_board tool, because your voice cannot show symbols.`,
   screen: `You can see their tablet screen, and you share a board with them.
 
-1. THEIR SCREEN. You see the student's whole screen, whatever app they have open: lecture slides or a PDF, their handwritten notes, a problem sheet, a website. Images of the screen arrive as video frames when it changes, and the newest frame shows what is on screen now. When the student says "this", "here" or "this question", they mean what is on screen now. A plain dark green box is this app's own floating bar or notes panel, blanked out so you don't read your own words: ignore it. If what they ask about is hidden behind it, ask them to move or shrink the panel.
+1. THEIR SCREEN. You see the student's whole screen, whatever app they have open: lecture slides or a PDF, their handwritten notes, a problem sheet, a website. Images of the screen arrive as video frames when it changes, and the newest frame shows what is on screen now. When the student says "this", "here" or "this question", they mean what is on screen now. A plain dark green box is this app's own floating bar or notes panel, blanked out so you don't read your own words: ignore it. If what they ask about is hidden behind it, ask them to move or shrink the panel. The student may also link their computer: pictures of its screen have a "PC screen" strip across the top, and every other screen picture is their tablet. When they mention the slides, the lecture or their PC, look at the newest PC picture.
 2. YOUR BOARD. Your written notes, which the student reads in that floating panel, in between a live transcript of what you say. The only way to show maths is the write_on_board tool, because your voice cannot show symbols.`,
 };
 
@@ -203,7 +203,7 @@ export function buildTools(profile, { screen = false, web = false } = {}) {
         {
           name: 'mark_student_work',
           ...nb,
-          description: `Mark the student's ${screen ? 'work on their screen' : 'handwritten page'} like a teacher with a coloured pen: tick correct lines, circle mistakes, flag things to check, or leave a short note. Coordinates are a box around the relevant writing in the most recent image of their ${where}: box_2d = [ymin, xmin, ymax, xmax], each from 0 to 1000.${screen ? ' The marks are drawn on top of their screen.' : ''}`,
+          description: `Mark the student's ${screen ? 'work on their screen' : 'handwritten page'} like a teacher with a coloured pen: tick correct lines, circle mistakes, flag things to check, or leave a short note. Coordinates are a box around the relevant writing in the most recent image of their ${screen ? 'tablet screen (never a "PC screen" picture)' : where}: box_2d = [ymin, xmin, ymax, xmax], each from 0 to 1000.${screen ? ' The marks are drawn on top of their tablet screen.' : ''}`,
           parameters: {
             type: 'OBJECT',
             properties: {

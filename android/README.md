@@ -49,6 +49,22 @@ After **Start lesson** the app gets out of the way and the tutor greets you. Ope
 
 What the tutor sees: a picture of the whole screen about once a second, only when something has changed, at most 1024 pixels on the long side. Chalkside's own bar and panel are blanked out in these pictures, so the tutor doesn't read its own notes. Pictures go straight from the tablet to Google with your key, as with the web app. If Android stops the screen sharing (some versions do when the tablet locks), the tutor can still hear you: open the app and tap **Share my screen again**.
 
+## Show the tutor your PC too
+
+For lecture slides on the PC while you write notes on the tablet:
+
+1. Put the PC and the tablet on the same Wi-Fi, and start a lesson on the tablet.
+2. On the PC, open **[jawedyari87-hue.github.io/chalkside/pclink](https://jawedyari87-hue.github.io/chalkside/pclink/)** in Chrome or Edge, or open `pclink/index.html` from this project.
+3. Type the **address** and **code** from the Chalkside start screen (under *Your PC's screen*), click **Share a screen or window**, and choose the window with your slides or the whole screen.
+
+The page sends a picture of what you shared, at most once a second and only when it has changed (moving the mouse doesn't count). The tutor gets these alongside your tablet's pictures, with a *PC screen* strip across the top so it can tell them apart. Ask about "the slide" or "my PC" and it looks at the newest PC picture. The bar shows **· PC** while the PC is linked. Keep the page open; its tab can be in the background, and its preview shows the last picture sent.
+
+- **Only during a lesson.** The tablet listens for the PC (on port 8792) only while a lesson runs, and only takes pictures that come with the code. **New code** on the start screen replaces the code; type the new one into the page. Ten wrong codes in a minute and the tablet stops listening to that computer until the minute is up.
+- **If the page can't reach the tablet**, check that both are on the same Wi-Fi and that the address is right. A browser may stop a web page from reaching devices on your Wi-Fi: save the page (**Ctrl+S**) and open the saved file instead. If Chrome asks to allow access to devices on your local network, allow it. Networks that keep devices apart, as eduroam and many university and public networks do, block the link completely. Home Wi-Fi or a phone hotspot works.
+- The PC does the sending, so nothing on the PC accepts connections and Windows Firewall needs no changes.
+- The tutor's pen marks only go on the tablet. It describes things on the PC in words.
+- PC pictures are at most 1280 pixels on the long side, so small slide text stays readable.
+
 ## Build it yourself
 
 You need JDK 17 and the Android SDK command-line tools with `platforms/android-35` and `build-tools/35.0.0`. On this PC they're in `C:\Users\Jawed\Android\jdk-17` and `C:\Users\Jawed\Android\Sdk`. To use other locations, set `JAVA_HOME` and `ANDROID_HOME`.
@@ -88,6 +104,8 @@ Add `?mock` (`--base "http://localhost:8791/?mock"`) for the fake tutor, which n
 | `src/.../SettingsActivity.java` | The web app's settings form (`?overlay&settings`) |
 | `src/.../MarksView.java` | The tutor's pen marks, drawn in a full-screen layer over other apps that lets touches through |
 | `src/.../FilePickerActivity.java` | Opens Android's file picker for the floating window's paperclip, which can't open one itself |
+| `src/.../PcLink.java` | During a lesson, a tiny web server on port 8792 that takes pictures of your PC's screen from the PC link page, if they come with the code |
+| `../pclink/index.html` | The PC link page: shares a screen or window in the PC's browser and sends it to the tablet |
 | `src/.../Web.java` | WebView set-up shared by both: storage, microphone, links open in the browser |
 | `build.py` | The build |
 

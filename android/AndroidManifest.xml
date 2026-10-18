@@ -5,6 +5,8 @@
     package="io.github.jawedyari87_hue.chalkside">
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- To show the tablet's Wi-Fi address for linking your PC. -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <!-- The WebView's voice processing (echo cancellation) switches the audio mode. -->
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />

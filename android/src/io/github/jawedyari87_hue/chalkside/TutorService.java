@@ -47,10 +47,15 @@ public class TutorService extends Service {
     private volatile ScreenCapture capture;
     private Overlay overlay;
     private MediaSession volumeKeys;
+    private volatile PcLink pcLink;
     private boolean stopped;
 
     ScreenCapture capture() {
         return capture;
+    }
+
+    PcLink pcLink() {
+        return pcLink;
     }
 
     /**
@@ -180,6 +185,11 @@ public class TutorService extends Service {
         }
         running = true;
         stopped = false;
+        if (pcLink == null) {
+            // Pictures of your PC's screen, if you've linked it (see PcLink).
+            pcLink = new PcLink(this);
+            pcLink.start();
+        }
         if (code == Activity.RESULT_OK && data != null) startCapture(code, data);
         if (overlay == null) {
             overlay = new Overlay(this);
@@ -268,6 +278,8 @@ public class TutorService extends Service {
         running = false;
         setLessonLive(false);
         stopCapture(true);
+        if (pcLink != null) pcLink.stop();
+        pcLink = null;
         if (overlay != null) overlay.destroy();
         overlay = null;
         stopForeground(STOP_FOREGROUND_REMOVE);

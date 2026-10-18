@@ -69,6 +69,12 @@ export function installMockNative() {
       state.volume = level;
     },
     setDraggable: (on) => log('setDraggable', on),
+    // A linked PC: window.__native.pcPicture() gives it a new picture.
+    pcFrame(since) {
+      if (!state.pc || (since !== -1 && since >= state.pc.seq)) return '';
+      return JSON.stringify(state.pc);
+    },
+    pcLinked: () => !!state.pc,
     openSettings: () => log('openSettings'),
     settingsClosed: (hasKey) => log('settingsClosed', hasKey),
     stop: () => log('stop'),
@@ -80,8 +86,23 @@ export function installMockNative() {
       state.scene++;
       draw();
     },
-    // A message from the app: 'stop', 'back', 'screen-stopped' or 'settings'.
+    // A message from the app: 'stop', 'blur', 'screen-stopped', 'screen-started', 'marks-cleared' or 'settings'.
     send: (type) => window.chalksideNative?.(type),
+    // A new picture of the linked PC's screen.
+    pcPicture() {
+      const c = document.createElement('canvas');
+      c.width = 640;
+      c.height = 400;
+      const g = c.getContext('2d');
+      g.fillStyle = '#ffffff';
+      g.fillRect(0, 0, 640, 400);
+      g.fillStyle = '#213a33';
+      g.fillRect(0, 0, 640, 28);
+      g.fillStyle = '#000000';
+      g.font = '28px sans-serif';
+      g.fillText(`Slide ${(state.pc?.seq || 0) + 1}: Eigenvalues`, 40, 120);
+      state.pc = { seq: (state.pc?.seq || 0) + 1, w: 640, h: 400, data: c.toDataURL('image/jpeg', 0.8).split(',')[1] };
+    },
   };
   console.info('[mock] Fake Android bridge installed');
 }
