@@ -286,6 +286,10 @@ button:disabled { cursor: default; }
 .blk__body code { font-family: var(--font-mono); font-size: 0.88em; background: rgba(0, 0, 0, 0.22); padding: 0.05em 0.35em; border-radius: 5px; }
 .blk__body pre { overflow-x: auto; background: rgba(0, 0, 0, 0.22); padding: 10px 12px; border-radius: 8px; }
 .blk__body pre code { background: none; padding: 0; }
+/* highlight.js colours the code; the board keeps its own background. */
+.blk__body pre code.hljs { background: none; padding: 0; overflow: visible; }
+.blk__diagram { margin: 0; overflow-x: auto; text-align: center; }
+.blk__diagram svg { max-width: 100%; height: auto; }
 .blk__body table { border-collapse: collapse; margin: 0.4em 0; display: block; overflow-x: auto; max-width: 100%; }
 .blk__body th, .blk__body td { border: 1px solid rgba(237, 241, 231, 0.32); padding: 0.25em 0.7em; text-align: center; }
 .blk__body th { color: var(--chalk-yellow); font-weight: 700; }
@@ -692,6 +696,18 @@ html.is-pc, html.is-pc body { background: var(--slate); }
 /* No window resizing to avoid here, so the status can give up room before the buttons do. */
 .is-pc .session { flex: 1 1 auto; min-width: 0; }
 .is-pc .status { width: auto; flex: 1 1 auto; min-width: 4.5em; }
+/* The panel is the tutor's board, with captions of what it says underneath, as on the website. */
+.is-pc[data-ov="panel"] .workspace {
+  display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); grid-template-areas: "board"; padding: 0;
+}
+.is-pc .page-panel, .is-pc .divider, .is-pc #asks, .is-pc #typeForm { display: none; }
+.is-pc .board-panel { border-radius: 0; box-shadow: none; }
+.is-pc .board-foot .type-ask { max-width: none; margin: 0; }
+.is-pc .captions__line--tutor { -webkit-line-clamp: 3; }
+/* Expand still shows everything in one feed; its asks and typing box live under the board. */
+.is-pc .notes { margin: 0; border-radius: 0; }
+.is-pc .notes__head { display: flex; }
+.is-pc .notes__foot { display: none; }
 /* The settings that are about the handwriting page don't apply; the microphone check does. */
 .is-pc [data-page-only]:not(#sMicGroup) { display: none !important; }
 

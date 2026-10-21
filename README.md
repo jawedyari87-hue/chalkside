@@ -4,7 +4,7 @@ A voice tutor for maths, coding and computer science, on a tablet or a PC. You t
 
 - sees your page (snapshots of what you've written, plus any photos or PDF pages you add)
 - talks you through it out loud
-- writes the maths on a chalkboard beside your page as it talks: steps, definitions, boxed answers, tables and graphs
+- writes on a chalkboard beside your page as it talks, instead of reading things out: maths, steps, definitions, boxed answers, tables, graphs, code (coloured by language), diagrams (trees, graphs, automata, flowcharts) and pictures from Wikipedia
 - marks your page like a teacher: green ticks on right lines, red circles round mistakes, short notes
 
 Everything runs in the browser. There's no server: the app connects straight from your tablet to Gemini using your own API key.
@@ -54,7 +54,7 @@ For studying at a computer: lecture slides, PDFs, code in your editor, terminal 
 1. **Share a screen or window.** A single window, such as your editor or the slides, works best, because then the tutor never sees its own notes.
 2. **Open the tutor.** It opens in a small window that stays on top of your other apps. Press **Start tutor** there. The first time, it asks for your Gemini key; its settings are behind the sliders button.
 
-It's the same floating bar and notes panel as the Android app, with the maths and code written out. The tutor gets a new picture only when your screen changes, up to 1600 pixels wide so code stays readable. The eye button hides your screen from it, and the expand button switches between the notes and a small bar. Keep the Chalkside PC page open, minimised if you like: closing it closes the tutor. If sharing stops, share again on that page. Switch to it from the taskbar, because Chrome's **Back to tab** button closes the tutor. In browsers that can't keep a window on top (Firefox, for example), the tutor appears beside the steps instead. On tablets and phones the page says it's for a computer, because they can't share their screen with a website.
+The window is the tutor's board: everything it writes (maths, code, diagrams, graphs, pictures), with live captions of what it says underneath. It writes rather than reading things out. **Expand** on the board shows everything in one feed, and **A−/A+** change the board's size. The tutor gets a new picture only when your screen changes, up to 1600 pixels wide so code stays readable. The eye button hides your screen from it, and the expand button switches between the notes and a small bar. Keep the Chalkside PC page open, minimised if you like: closing it closes the tutor. If sharing stops, share again on that page. Switch to it from the taskbar, because Chrome's **Back to tab** button closes the tutor. In browsers that can't keep a window on top (Firefox, for example), the tutor appears beside the steps instead. On tablets and phones the page says it's for a computer, because they can't share their screen with a website.
 
 The page is `pc/index.html`. The tutor is this app in screen mode (`?overlay&pc`), with `js/pcbridge.js` playing the Android app's part and `js/pccapture.js` taking the pictures. On a PC the tutor explains in words rather than drawing pen marks, since there's nothing to draw them on. To try it without a key, open http://localhost:8790/pc/?mock.
 

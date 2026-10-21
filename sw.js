@@ -1,5 +1,5 @@
 // Offline cache for the app itself. Talking to Gemini always needs the network.
-const CACHE = 'chalkside-v3';
+const CACHE = 'chalkside-v4';
 const SHELL = [
   './',
   './index.html',
@@ -19,6 +19,8 @@ const SHELL = [
   './js/pictures.js',
   './js/pccapture.js',
   './js/pcbridge.js',
+  './js/diagram.js',
+  './js/codehl.js',
   './pc/',
   './pc/manifest.webmanifest',
   './manifest.webmanifest',

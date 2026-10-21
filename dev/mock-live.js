@@ -183,7 +183,26 @@ export function installMock() {
         this._done();
         return;
       }
-      if (/picture|diagram/i.test(text)) {
+      if (/diagram|automat|tree/i.test(text) && !/picture/i.test(text)) {
+        await this._say("I've drawn it on the board. ");
+        this._tool('draw_diagram', {
+          title: 'A binary search tree',
+          code: 'graph TD\n  A((8)) --> B((3))\n  A --> C((10))\n  B --> D((1))\n  B --> E((6))\n  C --> F((14))',
+        });
+        this._done();
+        return;
+      }
+      if (/code|function|bug/i.test(text)) {
+        await this._say("The fix is on the board: look at the second line. ");
+        this._tool('write_on_board', {
+          kind: 'step',
+          title: 'Guard the empty list',
+          content: 'Check for an empty list before dividing:\n```python\ndef mean(xs):\n    if not xs:\n        return 0\n    return sum(xs) / len(xs)\n```\nThat makes it $O(n)$, and `mean([])` returns `0`.',
+        });
+        this._done();
+        return;
+      }
+      if (/picture/i.test(text)) {
         await this._say("Here's a picture of one from Wikipedia. ");
         this._tool('show_picture', { query: /tree/i.test(text) ? 'Binary search tree' : 'Unit circle', caption: 'From Wikipedia' });
         this._done();

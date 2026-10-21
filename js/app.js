@@ -8,6 +8,7 @@ import { AudioEngine } from './audio.js';
 import { LiveSession, isQuota } from './live.js';
 import { MODELS, VOICES, modelProfile, buildSystemPrompt, buildTools, ASKS, SCREEN_ASKS, PC_ASKS } from './prompt.js';
 import { pcBridge } from './pcbridge.js';
+import { diagramSVG } from './diagram.js';
 import { lessons } from './store.js';
 import { openPdf, renderPdfPage, showThumbnails } from './pdfimport.js';
 import { renderInline } from './math.js';
@@ -598,7 +599,7 @@ function setNotesScale(v) {
 }
 document.addEventListener('keydown', (e) => {
   if (e.key !== 'Escape' || !notes.isOpen || document.querySelector('dialog[open]')) return;
-  if (SCREEN) setOvMode('bubble');
+  if (SCREEN && !PC) setOvMode('bubble');
   else closeNotes();
 });
 
@@ -1440,6 +1441,12 @@ const TOOLS = {
     const r = board.plot(a);
     return r.errors.length ? { ok: true, id: r.id, errors: r.errors } : { ok: true, id: r.id };
   },
+  // Drawn before it goes on the board, so a Mermaid mistake goes back to the tutor to fix.
+  async draw_diagram(a) {
+    const { svg, id } = await diagramSVG(a.code);
+    const block = board.addDiagram({ code: a.code, title: a.title, svg, svgId: id });
+    return { ok: true, id: block.id };
+  },
   mark_student_work(a) {
     if (SCREEN) return markScreen(a.marks);
     const n = page.addMarks(a.marks, S.lastFrameRect);
@@ -1770,7 +1777,7 @@ function setOvMode(mode) {
     ov.size = '';
     renderBadge();
     droid?.setMode('panel', 0, 0);
-    openNotes();
+    if (!PC) openNotes(); // on a computer the panel is the board, with the captions under it
   } else {
     droid?.setFocusable(false);
     if (notes.isOpen) closeNotes();
@@ -2231,6 +2238,12 @@ async function boot() {
     // On a tablet the settings are on the app's start screen; on a computer they're in the bar.
     $('#ovSettings').hidden = false;
     $('#ovSettings').addEventListener('click', () => openSettings());
+    // The window is the tutor's board, with what it says as captions underneath: writing and
+    // speech in two places. The quick asks, paperclip and typing box go under the board too,
+    // and Expand still opens everything in one feed.
+    $('.board-foot').append($('#shareStatus'), $('#screenAsks'), $('#notesTypeForm'));
+    $('.notes__tools').prepend($('#notesSmaller'), $('#notesBigger'));
+    $('#notesClose span').textContent = 'Back to the board';
     // On a computer the window opens with the notes, and the tutor starts from the Start
     // button: the browser lets a page start sound (and share the screen) only from a click.
     setOvMode('panel');

@@ -3,6 +3,8 @@
 import { renderRich, renderInline, plainText, repairLatex } from './math.js';
 import { plotSVG } from './plot.js';
 import { escapeHtml } from './util.js';
+import { highlightCode } from './codehl.js';
+import { diagramCopy } from './diagram.js';
 
 const KIND_LABELS = {
   step: 'Step',
@@ -16,7 +18,11 @@ const KIND_LABELS = {
   note: '',
   graph: 'Graph',
   picture: 'Picture',
+  diagram: 'Diagram',
 };
+
+// Blocks drawn by their own tools, which write_on_board can't make or rewrite.
+const DRAWN = new Set(['graph', 'picture', 'diagram']);
 
 const KIND_ALIASES = {
   yourturn: 'your_turn', 'your turn': 'your_turn', question: 'your_turn', exercise: 'your_turn', practice: 'your_turn', try: 'your_turn',
@@ -30,7 +36,7 @@ const KIND_ALIASES = {
 
 function normKind(k) {
   const s = String(k || 'note').toLowerCase().trim();
-  if (s in KIND_LABELS && s !== 'graph' && s !== 'picture') return s;
+  if (s in KIND_LABELS && !DRAWN.has(s)) return s;
   return KIND_ALIASES[s] || KIND_ALIASES[s.replace(/[_-]+/g, ' ')] || 'note';
 }
 
@@ -98,6 +104,7 @@ export class Board extends EventTarget {
       let what = plainText(b.content, 300);
       if (b.kind === 'graph') what = `graph of ${(b.spec?.functions || []).map((f) => f.expr).join(', ')}`;
       if (b.kind === 'picture') what = `picture of ${b.pic?.title || b.query} from Wikipedia`;
+      if (b.kind === 'diagram') what = `diagram: ${plainText(b.code, 200)}`;
       return `#${b.id} ${b.kind}${b.title ? ` "${b.title}"` : ''}: ${what}`;
     });
   }
@@ -123,7 +130,7 @@ export class Board extends EventTarget {
     const rid = Number(args.replace_id);
     if (rid) {
       const found = this.find(rid);
-      if (found && found.block.kind !== 'graph' && found.block.kind !== 'picture') {
+      if (found && !DRAWN.has(found.block.kind)) {
         // Keep the original time so the block stays in its place in the notes feed.
         Object.assign(found.block, { content, kind, title, edited: true });
         const { errors } = renderRich(content);
@@ -168,6 +175,17 @@ export class Board extends EventTarget {
     this.announce(block, this.current, false);
     this.changed();
     return { id: block.id, errors };
+  }
+
+  // A diagram, already drawn (by diagram.js) from the tutor's Mermaid code.
+  addDiagram({ code, title = '', svg, svgId }) {
+    this.leaveSample();
+    const block = { id: this.data.nextId++, kind: 'diagram', title: repairLatex(String(title ?? '')).trim().slice(0, 120), code: String(code), svg, svgId, t: Date.now() };
+    this.current.blocks.push(block);
+    this.appendLatest(block);
+    this.announce(block, this.current, false);
+    this.changed();
+    return block;
   }
 
   // A picture from Wikipedia: in place straight away ("Finding a picture…"), filled in by setPicture.
@@ -288,12 +306,16 @@ export class Board extends EventTarget {
             .join('')}</figcaption>`
         : '';
       body = `<figure class="blk__plot">${r.svg}${legend}</figure>`;
+    } else if (block.kind === 'diagram') {
+      // Mermaid made this SVG in its strict mode, which strips scripts and links from labels.
+      body = `<figure class="blk__diagram">${diagramCopy(block.svg, block.svgId)}</figure>`;
     } else {
       const r = renderRich(block.content);
       errors = r.errors;
       body = `<div class="blk__body">${r.html}</div>`;
     }
     el.innerHTML = head + body;
+    highlightCode(el);
     if (animate && !matchMedia('(prefers-reduced-motion: reduce)').matches) {
       el.classList.add('is-new');
       el.addEventListener('animationend', () => el.classList.remove('is-new'), { once: true });
