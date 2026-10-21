@@ -1,0 +1,15 @@
+{
+  "id": "chalkside-pc",
+  "name": "Chalkside PC",
+  "short_name": "Chalkside PC",
+  "description": "A Gemini Live tutor for maths, coding and computer science that sees the screen or window you share.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#213a33",
+  "theme_color": "#213a33",
+  "icons": [
+    { "src": "../icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "../icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" }
+  ]
+}

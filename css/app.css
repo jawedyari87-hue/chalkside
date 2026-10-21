@@ -685,6 +685,16 @@ html.is-overlay, html.is-overlay body { background: transparent; }
 .share-status__text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .is-overlay .asks--screen { display: flex; }
 
+/* ---- on a computer (?overlay&pc): the same floating tutor, in a window that stays on top ---- */
+html.is-pc, html.is-pc body { background: var(--slate); }
+.is-pc[data-ov="panel"] .app { border-radius: 0; }
+[data-ov="bubble"] #ovSettings { display: none; }
+/* No window resizing to avoid here, so the status can give up room before the buttons do. */
+.is-pc .session { flex: 1 1 auto; min-width: 0; }
+.is-pc .status { width: auto; flex: 1 1 auto; min-width: 4.5em; }
+/* The settings that are about the handwriting page don't apply; the microphone check does. */
+.is-pc [data-page-only]:not(#sMicGroup) { display: none !important; }
+
 /* ---- the Android app's settings screen (?overlay&settings): just the settings, full screen ---- */
 .is-app-settings .app { display: none; }
 .is-app-settings [data-page-only] { display: none !important; }

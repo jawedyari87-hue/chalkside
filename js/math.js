@@ -217,13 +217,37 @@ function markdown(md, inline) {
   return inline ? m.parseInline(md, opts) : m.parse(md, opts);
 }
 
+// Code is shown exactly as written. It is set aside before the maths repairs, which would read
+// a $ in a shell script or a ^ in C as maths. Blocks marked latex, tex or math are maths.
+const CODE_FENCE = /```[ \t]*([\w+#.-]*)[^\n]*\n([\s\S]*?)```/g;
+
+function setAsideCode(s, codes) {
+  s = s.replace(CODE_FENCE, (whole, lang, body) => {
+    if (/^(latex|tex|math|katex)$/i.test(lang) || (!lang && looksLikeBareLatex(body.trim()))) return whole;
+    return `\n\n⟬${codes.push({ lang, body: body.replace(/\n$/, ''), block: true }) - 1}⟭\n\n`;
+  });
+  // Inline code that looks like LaTeX is left for rescueMaths to turn back into maths.
+  return s.replace(/`([^`\n]+)`/g, (whole, body) => (looksTexy(body) ? whole : `⟬${codes.push({ body, block: false }) - 1}⟭`));
+}
+
+function restoreCode(html, codes) {
+  const block = (c) => `<pre><code${c.lang ? ` class="language-${escapeHtml(c.lang)}"` : ''}>${escapeHtml(c.body)}</code></pre>`;
+  html = html.replace(/<p>\s*⟬(\d+)⟭\s*<\/p>/g, (whole, n) => (codes[Number(n)]?.block ? block(codes[Number(n)]) : whole));
+  return html.replace(/⟬(\d+)⟭/g, (_, n) => {
+    const c = codes[Number(n)];
+    if (!c) return '';
+    return c.block ? block(c) : `<code>${escapeHtml(c.body)}</code>`;
+  });
+}
+
 /**
  * Render Markdown + LaTeX to safe HTML.
  * Returns { html, errors } where errors lists LaTeX the renderer could not parse.
  */
 export function renderRich(src, { inline = false } = {}) {
   const errors = [];
-  let text = repairLatex(src).replace(/\r\n?/g, '\n');
+  const codes = [];
+  let text = repairLatex(setAsideCode(String(src ?? '').replace(/\r\n?/g, '\n'), codes));
   if (!inline && looksLikeBareLatex(text)) text = `$$${text}$$`;
   else text = rescueMaths(text);
   const parts = splitMath(text);
@@ -242,7 +266,7 @@ export function renderRich(src, { inline = false } = {}) {
   // A display formula alone in a paragraph does not need the paragraph's margins.
   html = html.replace(/<p>\s*⟦(\d+)⟧\s*<\/p>/g, (whole, n) => (maths[Number(n)]?.display ? maths[Number(n)].html : whole));
   html = html.replace(/⟦(\d+)⟧/g, (_, n) => maths[Number(n)]?.html ?? '');
-  return { html, errors };
+  return { html: restoreCode(html, codes), errors };
 }
 
 export function renderInline(src) {

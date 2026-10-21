@@ -48,9 +48,13 @@ const HELP_STYLES = {
     'Show clear worked solutions on the board, one step at a time, explaining each step as you write it. After a solution, check understanding with a short question.',
 };
 
-// The two surfaces: the student's handwritten page in the web app, or their whole
-// tablet screen in the Android app (screen: true).
+// The surfaces: the student's handwritten page in the web app, their whole tablet screen in
+// the Android app (screen: true), or what they share from their computer (pc: true).
 const SURFACES = {
+  pc: `You can see their computer screen, and you share a board with them.
+
+1. THEIR SCREEN. You see the screen or window the student shares from their computer: lecture slides or a PDF, code in their editor, a terminal or an error message, a problem sheet, a website. Images of it arrive as video frames when it changes, and the newest frame shows what is on screen now. When the student says "this", "here", "this error" or "this line", they mean what is on screen now. A small dark green Chalkside window may float over the screen: that is this app showing your notes, so ignore it. If what they ask about is covered, cut off or too small to read, ask them to move the window, scroll or zoom in.
+2. YOUR BOARD. Your written notes, which the student reads in the Chalkside window, in between a live transcript of what you say. The only way to show maths or code is the write_on_board tool, because your voice cannot show symbols.`,
   page: `You share two surfaces with them.
 
 1. THEIR PAGE. They write by hand with a stylus. You receive images of their page as video frames, and the newest frame shows what they have written so far. They may also add photos of questions, lecture slides or worked answers to the page.
@@ -62,6 +66,10 @@ const SURFACES = {
 };
 
 const CHECKING = {
+  pc: [
+    'When the student asks you to check their work or their code, look closely at the newest image of their screen and read it line by line. Say exactly where the first problem is (the line number if you can see one, otherwise the text of the line) and what is wrong, out loud and on the board if it needs maths or code. Then let them fix it themselves.',
+    'If you cannot read something on the screen because it is too small, cut off or covered, say so and ask them to zoom in or scroll. Never guess what it says.',
+  ],
   page: [
     "When the student asks you to check their work, look closely at the newest image of their page and read it line by line. Use mark_student_work to tick the correct lines and circle the first mistake, with a label of a few words. Explain in words what is wrong, and on the board if it needs maths. Then let them fix it themselves.",
     'If you cannot read part of their handwriting, say which part and ask. Never guess what they wrote.',
@@ -78,10 +86,19 @@ PICTURES
 - show_picture puts the main picture of a Wikipedia article into your notes and also sends it to you, so you can talk about it. Use it when a picture explains something better than words: a well-known diagram, figure or graph. For maths you can write or plot, use the board instead. Never show anything unsuitable for a study session.
 `;
 
-export function buildSystemPrompt(s, { screen = false } = {}) {
+// Programming and computer science, alongside the maths.
+const CODE_RULES = `
+CODE AND COMPUTER SCIENCE
+- Show code on the board in a Markdown code block with its language (\`\`\`python ... \`\`\`): only the few lines that matter, never a whole program. Keep maths in $...$, never in a code block.
+- Say code the way a programmer would ("for i in range n", "x plus equals one"); never read out brackets, semicolons or other punctuation.
+- When the student is programming, help them understand and fix the problem rather than writing their solution for them: explain error messages in plain words, point to the line, and suggest what to check, print or try next.
+- For algorithms and data structures, explain the idea first, then trace a small example step by step on the board. Give time and space complexity in big-O, with the reason.
+`;
+
+export function buildSystemPrompt(s, { screen = false, pc = false } = {}) {
   const about = String(s.about || '').trim();
-  const mode = screen ? 'screen' : 'page';
-  return `You are Chalkside, a patient and expert private maths tutor. You are on a live voice call with a university student in the UK. ${SURFACES[mode]}
+  const mode = pc ? 'pc' : screen ? 'screen' : 'page';
+  return `You are Chalkside, a patient and expert private tutor for maths, programming and computer science. You are on a live voice call with a university student in the UK. ${SURFACES[mode]}
 
 BE QUICK
 - Start talking straight away when the student finishes speaking. Never go silent while you prepare something for the board: say your first sentence, then write.
@@ -108,10 +125,10 @@ TEACHING
 - ${HELP_STYLES[s.help] || HELP_STYLES.balanced}
 - ${CHECKING[mode].join('\n- ')}
 - Be careful with your own maths. Work anything non-trivial out step by step before you say it. If you are not sure, say so and check it on the board together.
-- When they are confused by lecture notes or a model answer ${screen ? 'on their screen' : 'they have added'}, explain the idea in plain words first, then show the steps on the board.
+- When they are confused by lecture notes or a model answer ${screen || pc ? 'on their screen' : 'they have added'}, explain the idea in plain words first, then show the steps on the board.
 - Be warm, encouraging and honest. Praise specific things they did well. Never be sarcastic.
 - Use British English and UK conventions: maths, brackets, nought, "dy by dx".
-${s.web === false ? '' : WEB_RULES}
+${CODE_RULES}${s.web === false ? '' : WEB_RULES}
 MESSAGES FROM THE APP
 - Text in [square brackets] comes from the app, not the student. Follow it quietly and never read it out.
 ${about ? `\nABOUT THE STUDENT (in their own words)\n${about}\n` : ''}`;
@@ -120,8 +137,9 @@ ${about ? `\nABOUT THE STUDENT (in their own words)\n${about}\n` : ''}`;
 const STR = { type: 'STRING' };
 
 // With screen: true (the Android app) the tutor marks the student's screen instead of their page.
+// With pc: true (a computer screen) there is nothing to draw marks on, so it explains in words.
 // With web: true it can also show Wikipedia pictures.
-export function buildTools(profile, { screen = false, web = false } = {}) {
+export function buildTools(profile, { screen = false, pc = false, web = false } = {}) {
   const nb = profile.nonBlocking ? { behavior: 'NON_BLOCKING' } : {};
   const where = screen ? 'screen' : 'page';
   const tools = [
@@ -131,14 +149,14 @@ export function buildTools(profile, { screen = false, web = false } = {}) {
           name: 'write_on_board',
           ...nb,
           description:
-            `${screen ? 'Write in your notes, which the student reads in a floating panel over their screen.' : 'Write on the whiteboard beside the student.'} Use it for all maths: equations, working, definitions, examples, tables, summaries. One step or idea per call, in time with what you say. Returns the block id.`,
+            `${screen || pc ? 'Write in your notes, which the student reads in the Chalkside window over their screen.' : 'Write on the whiteboard beside the student.'} Use it for all maths and code: equations, working, definitions, examples, code snippets, tables, summaries. One step or idea per call, in time with what you say. Returns the block id.`,
           parameters: {
             type: 'OBJECT',
             properties: {
               content: {
                 ...STR,
                 description:
-                  'Markdown with LaTeX. $...$ inline, $$...$$ displayed. Keep it short: a few lines. Example: "Differentiate term by term: $$\\frac{d}{dx}\\left(3x^2\\right) = 6x$$"',
+                  'Markdown with LaTeX. $...$ inline, $$...$$ displayed; code in a ``` block with its language. Keep it short: a few lines. Example: "Differentiate term by term: $$\\frac{d}{dx}\\left(3x^2\\right) = 6x$$"',
               },
               kind: {
                 ...STR,
@@ -249,6 +267,10 @@ export function buildTools(profile, { screen = false, web = false } = {}) {
     // up Google refuses the whole lesson with "You exceeded your current quota", even though the
     // key itself still works (found 2026-10-18: the same key was accepted without it).
   }
+  if (pc) {
+    const decl = tools[0].functionDeclarations;
+    tools[0].functionDeclarations = decl.filter((d) => d.name !== 'mark_student_work' && d.name !== 'clear_marks');
+  }
   return tools;
 }
 
@@ -267,4 +289,11 @@ export const SCREEN_ASKS = {
   ...ASKS,
   check: 'Can you check my working on my screen so far?',
   screen: 'Can you explain what is on my screen right now?',
+};
+
+// And when it sees a computer screen: code and errors as well as maths.
+export const PC_ASKS = {
+  ...SCREEN_ASKS,
+  check: 'Can you check my working or my code on my screen so far?',
+  hint: 'Can I have a hint for the next step? Please don’t give me the answer yet.',
 };

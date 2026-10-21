@@ -1,0 +1,226 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Chalkside PC</title>
+<!--
+  Chalkside on a computer: a Gemini Live tutor for maths, coding and computer science that sees
+  the screen or window you share here. The tutor itself is the same page the Android app floats
+  over other apps (../?overlay&pc); here it opens in a window that stays on top (Chrome and Edge),
+  or beside these steps where browsers can't do that. js/pcbridge.js connects the two.
+-->
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="../icons/icon-192.png">
+<meta name="theme-color" content="#213a33">
+<style>
+  :root { --slate: #213a33; --chalk: #edf1e7; --dim: #a8b8ae; --accent: #5fb39a; --ink: #0d1a15; --bad: #ff8b7e; color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body { margin: 0; min-height: 100vh; background: var(--slate); color: var(--chalk); font: 16px/1.5 system-ui, "Segoe UI", sans-serif; }
+  main { display: grid; grid-template-columns: minmax(0, 560px); justify-content: center; gap: 0 32px; padding: 32px 20px 48px; }
+  main.is-beside { grid-template-columns: minmax(0, 460px) minmax(0, 520px); }
+  h1 { margin: 0 0 4px; font-size: 28px; }
+  h2 { margin: 0 0 6px; font-size: 17px; }
+  p { margin: 8px 0; }
+  .dim { color: var(--dim); font-size: 15px; }
+  .step { margin-top: 22px; padding: 16px 18px; border-radius: 14px; background: rgba(0, 0, 0, 0.18); }
+  .step.is-off { opacity: 0.45; }
+  .buttons { display: flex; gap: 10px; margin-top: 12px; flex-wrap: wrap; }
+  button { height: 46px; padding: 0 20px; border: 0; border-radius: 23px; background: var(--accent); color: var(--ink); font: 700 16px system-ui, sans-serif; cursor: pointer; }
+  button.ghost { background: transparent; color: var(--chalk); border: 1px solid rgba(237, 241, 231, 0.4); }
+  button:disabled { cursor: default; }
+  .status { font-weight: 600; }
+  .bad { color: var(--bad); }
+  .note { padding: 12px 14px; border-radius: 10px; background: rgba(255, 139, 126, 0.15); }
+  ul { margin: 8px 0 0; padding-left: 20px; }
+  li + li { margin-top: 4px; }
+  #here { display: none; height: min(760px, calc(100vh - 64px)); border-radius: 14px; overflow: hidden; background: var(--slate); box-shadow: 0 0 0 1px rgba(237, 241, 231, 0.14); }
+  main.is-beside #here { display: block; position: sticky; top: 32px; }
+  [hidden] { display: none !important; }
+  @media (max-width: 1040px) { main.is-beside { grid-template-columns: minmax(0, 560px); } main.is-beside #here { position: static; margin-top: 22px; } }
+</style>
+</head>
+<body>
+<main id="main">
+  <div>
+    <h1>Chalkside PC</h1>
+    <p>Study maths, coding and computer science with a voice tutor that can see the screen or window you share: lecture slides, a PDF, your code, a terminal. Talk to it, and it writes the maths and code in its notes.</p>
+    <p class="note" id="notPc" hidden>This part of Chalkside is for a computer. Open this page in Chrome or Edge on your PC.</p>
+
+    <section class="step" id="step1">
+      <h2>1. Share a screen or window</h2>
+      <p class="dim">A single window, such as your code editor or the slides, works best: the tutor then never sees its own notes.</p>
+      <p class="status" id="shareState" role="status"></p>
+      <div class="buttons">
+        <button type="button" id="share">Share a screen or window</button>
+        <button type="button" class="ghost" id="unshare" hidden>Stop sharing</button>
+      </div>
+    </section>
+
+    <section class="step is-off" id="step2">
+      <h2>2. Open the tutor</h2>
+      <p class="dim" id="openHelp">It opens in a small window that stays on top of your other apps. Press <strong>Start tutor</strong> there, and allow the microphone when asked.</p>
+      <p class="status" id="tutorState" role="status"></p>
+      <div class="buttons">
+        <button type="button" id="open" disabled>Open the tutor</button>
+        <button type="button" class="ghost" id="close" hidden>Close the tutor</button>
+      </div>
+    </section>
+
+    <section class="step">
+      <h2>Good to know</h2>
+      <ul class="dim">
+        <li>Keep this page open while you study. You can minimise it; closing it closes the tutor.</li>
+        <li>The tutor gets a new picture only when your screen changes. The eye button in its window hides your screen from it.</li>
+        <li>It needs your free Gemini key: the first time, the tutor window asks for it. Its settings are in the sliders button.</li>
+        <li>To open Chalkside PC like an app, click <strong>Install</strong> in Chrome's or Edge's address bar.</li>
+      </ul>
+    </section>
+  </div>
+  <div id="here"></div>
+</main>
+
+<script type="module">
+import { PcScreen } from '../js/pccapture.js';
+
+const $ = (s) => document.querySelector(s);
+const params = new URLSearchParams(location.search);
+const TUTOR = new URL(`../?overlay&pc${params.has('mock') ? '&mock' : ''}`, location.href).href;
+const screen = new PcScreen();
+let pip = null; // the window that stays on top, where browsers have them
+let frame = null; // the tutor
+let panelSize = [520, 740];
+
+const touchOnly = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+if (touchOnly || !navigator.mediaDevices?.getDisplayMedia) {
+  $('#notPc').hidden = false;
+  $('#share').disabled = true;
+}
+if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('../sw.js', { scope: '../' }).catch(() => {});
+
+function render() {
+  const sharing = screen.sharing;
+  $('#shareState').textContent = sharing ? `Sharing: ${screen.label}.` : '';
+  $('#share').textContent = sharing ? 'Share something else' : 'Share a screen or window';
+  $('#unshare').hidden = !sharing;
+  $('#step2').classList.toggle('is-off', !sharing && !frame);
+  $('#open').disabled = !sharing || !!frame;
+  $('#open').hidden = !!frame;
+  $('#close').hidden = !frame;
+  $('#tutorState').textContent = !frame ? '' : pip ? 'The tutor is open in its own window, on top of your other apps.' : 'The tutor is beside these steps. Your browser can’t keep it on top of other apps, so put this window beside your work.';
+}
+
+// What the tutor page reaches for as window.parent.chalksidePc (see js/pcbridge.js).
+function hostFor(win) {
+  return {
+    screen,
+    floating: win !== window, // in its own window, rather than beside these steps
+    close: () => closeTutor(),
+    // The tutor's small bar or its panel with the notes: fit the window that stays on top.
+    resize(mode, w, h) {
+      if (win === window) return;
+      try {
+        const dw = win.outerWidth - win.innerWidth;
+        const dh = win.outerHeight - win.innerHeight;
+        if (mode === 'bubble') {
+          if (win.innerHeight > h + 40) panelSize = [win.innerWidth, win.innerHeight];
+          win.resizeTo(w + dw, h + dh);
+        } else {
+          win.resizeTo(panelSize[0] + dw, panelSize[1] + dh);
+        }
+      } catch {
+        /* the browser said no: keep the size */
+      }
+    },
+  };
+}
+
+function makeFrame(doc) {
+  const f = doc.createElement('iframe');
+  f.src = TUTOR;
+  f.title = 'Chalkside tutor';
+  f.allow = 'microphone; display-capture; autoplay; screen-wake-lock; clipboard-write';
+  Object.assign(f.style, { border: '0', width: '100%', height: '100%', display: 'block' });
+  return f;
+}
+
+async function share() {
+  $('#shareState').classList.remove('bad');
+  try {
+    await screen.start();
+  } catch (err) {
+    $('#shareState').textContent = err?.name === 'NotAllowedError' ? 'Sharing was cancelled.' : `Couldn't share: ${err?.message || err}`;
+    $('#shareState').classList.add('bad');
+    return;
+  }
+  render();
+  // Ask for the microphone here too, where the browser shows the question clearly.
+  try {
+    const s = await navigator.mediaDevices.getUserMedia({ audio: true });
+    s.getTracks().forEach((t) => t.stop());
+  } catch {
+    /* the tutor window asks again, and its settings explain how to allow it */
+  }
+}
+
+async function openTutor() {
+  if (frame) return;
+  if ('documentPictureInPicture' in window) {
+    try {
+      pip = await documentPictureInPicture.requestWindow({ width: panelSize[0], height: panelSize[1] });
+      const d = pip.document;
+      d.title = 'Chalkside tutor';
+      d.documentElement.style.height = '100%';
+      Object.assign(d.body.style, { margin: '0', height: '100%', background: '#213a33', overflow: 'hidden' });
+      pip.chalksidePc = hostFor(pip);
+      frame = makeFrame(d);
+      d.body.append(frame);
+      pip.addEventListener('pagehide', () => {
+        pip = null;
+        frame = null;
+        tutorClosed();
+      });
+      render();
+      return;
+    } catch (err) {
+      console.warn('[chalkside] No window that stays on top:', err);
+      pip = null;
+    }
+  }
+  // No window that stays on top: the tutor goes beside these steps.
+  window.chalksidePc = hostFor(window);
+  frame = makeFrame(document);
+  $('#here').append(frame);
+  $('#main').classList.add('is-beside');
+  render();
+}
+
+function closeTutor() {
+  if (pip) return pip.close(); // its pagehide does the rest
+  frame?.remove();
+  frame = null;
+  tutorClosed();
+}
+
+function tutorClosed() {
+  $('#main').classList.remove('is-beside');
+  screen.stop();
+  render();
+}
+
+screen.addEventListener('ended', () => {
+  render();
+  $('#shareState').textContent = 'Sharing has stopped, so the tutor can’t see your screen. Share it again here.';
+  $('#shareState').classList.add('bad');
+});
+$('#share').addEventListener('click', share);
+$('#unshare').addEventListener('click', () => {
+  screen.stop();
+  screen.dispatchEvent(new Event('ended'));
+});
+$('#open').addEventListener('click', openTutor);
+$('#close').addEventListener('click', closeTutor);
+render();
+</script>
+</body>
+</html>

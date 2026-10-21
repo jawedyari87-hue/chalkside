@@ -1,12 +1,13 @@
-// Chalkside: a voice maths tutor (Gemini Live) that watches your handwriting
-// and writes the maths on a chalkboard beside your page.
+// Chalkside: a voice tutor for maths, coding and computer science (Gemini Live) that watches your
+// handwriting and writes the maths on a chalkboard beside your page.
 
 import { $, $$, clamp, debounce, sleep, uid, prefs, bytesToBase64, base64ToBytes, fmtClock, fmtDate, toast, imageToDataUrl, escapeHtml, cleanSpeech } from './util.js';
 import { InkPage, PEN_COLOURS, HL_COLOURS, SWATCH } from './ink.js';
 import { Board } from './board.js';
 import { AudioEngine } from './audio.js';
 import { LiveSession, isQuota } from './live.js';
-import { MODELS, VOICES, modelProfile, buildSystemPrompt, buildTools, ASKS, SCREEN_ASKS } from './prompt.js';
+import { MODELS, VOICES, modelProfile, buildSystemPrompt, buildTools, ASKS, SCREEN_ASKS, PC_ASKS } from './prompt.js';
+import { pcBridge } from './pcbridge.js';
 import { lessons } from './store.js';
 import { openPdf, renderPdfPage, showThumbnails } from './pdfimport.js';
 import { renderInline } from './math.js';
@@ -21,20 +22,25 @@ const MOCK = params.has('mock');
 const OVERLAY = params.has('overlay');
 const APP_SETTINGS = OVERLAY && params.has('settings');
 const SCREEN = OVERLAY && !APP_SETTINGS;
+// The same floating tutor on a computer (?overlay&pc), seeing the screen or window you share
+// there. The Chalkside PC page (pc/) opens it in a window that stays on top; js/pcbridge.js
+// plays the Android app's part.
+const PC = SCREEN && params.has('pc');
 // Straight away, so the full app never flashes up in the app's windows.
 if (SCREEN) document.documentElement.classList.add('is-overlay');
+if (PC) document.documentElement.classList.add('is-pc');
 if (APP_SETTINGS) document.documentElement.classList.add('is-app-settings');
 if (MOCK) {
   try {
     const mock = await import('../dev/mock-live.js');
     mock.installMock();
-    if (OVERLAY && !window.ChalksideAndroid) (await import('../dev/mock-native.js')).installMockNative();
+    if (OVERLAY && !PC && !window.ChalksideAndroid) (await import('../dev/mock-native.js')).installMockNative();
   } catch {
     console.warn('[chalkside] ?mock needs the dev folder, which is not deployed here.');
   }
 }
-const droid = OVERLAY ? window.ChalksideAndroid || null : null;
-const asks = SCREEN ? SCREEN_ASKS : ASKS;
+const droid = PC ? pcBridge() : OVERLAY ? window.ChalksideAndroid || null : null;
+const asks = PC ? PC_ASKS : SCREEN ? SCREEN_ASKS : ASKS;
 // iPads and iPhones, where every browser runs on Safari's engine. iPads say they are Macs.
 const IOS = /iP(hone|ad|od)/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
 
@@ -667,7 +673,7 @@ $('#sKeyShow').addEventListener('click', (e) => {
 
 // mic: open at the Microphone section, with the steps to allow it.
 function openSettings(reason = '', { mic = false } = {}) {
-  if (SCREEN) {
+  if (SCREEN && !PC) {
     // The floating window has no room for the settings form, so the app opens its settings screen.
     if (reason) toast(reason, { ms: 6000 });
     droid?.openSettings();
@@ -845,8 +851,8 @@ function buildSetup() {
   const setup = {
     model: `models/${profile.id}`,
     generationConfig,
-    systemInstruction: { parts: [{ text: buildSystemPrompt(settings, { screen: SCREEN }) }] },
-    tools: buildTools(profile, { screen: SCREEN, web: settings.web }),
+    systemInstruction: { parts: [{ text: buildSystemPrompt(settings, { screen: SCREEN, pc: PC }) }] },
+    tools: buildTools(profile, { screen: SCREEN, pc: PC, web: settings.web }),
     // Left to guess, the transcript of what you say sometimes comes out in another language.
     inputAudioTranscription: { languageCodes: ['en-GB'] },
     outputAudioTranscription: {},
@@ -1798,11 +1804,15 @@ function overlayPhase(p) {
   fitBubble();
 }
 
-function toggleScreen() {
-  S.screenPaused = !S.screenPaused;
+function showEye() {
   const eye = $('#ovEye');
   eye.setAttribute('aria-pressed', String(!S.screenPaused));
   eye.setAttribute('aria-label', S.screenPaused ? 'Let the tutor see your screen again' : 'Hide your screen from the tutor');
+}
+
+function toggleScreen() {
+  S.screenPaused = !S.screenPaused;
+  showEye();
   droid?.setCapture(S.phase !== 'idle' && !S.screenPaused);
   toast(S.screenPaused ? 'The tutor can no longer see your screen.' : 'The tutor can see your screen again.', { ms: 2500 });
   if (!S.screenPaused) setTimeout(() => sendFrame({ force: true }), 300);
@@ -1834,9 +1844,27 @@ function onNative(type) {
   else if (type === 'blur') document.activeElement?.blur?.(); // you tapped another app, or Back, while typing
   else if (type === 'marks-cleared') showMarksButton(false); // you scrolled, switched app or turned the tablet
   else if (type === 'screen-started') {
+    if (PC && S.screenPaused) {
+      S.screenPaused = false;
+      showEye();
+    }
     toast('The tutor can see your screen again.', { ms: 3000 });
     setTimeout(() => sendFrame({ force: true }), 1200);
   } else if (type === 'screen-stopped') {
+    if (PC) {
+      // So the eye button shares a screen again (standalone), and shows the screen as hidden meanwhile.
+      if (!S.screenPaused) {
+        S.screenPaused = true;
+        showEye();
+      }
+      const again = !droid.hosted
+        ? 'Tap the eye button to share a screen or window again.'
+        : droid.floating
+          ? 'Share it again on the Chalkside PC page: switch to it from the taskbar. (Back to tab would close the tutor.)'
+          : 'Share it again in step 1, beside this.';
+      toast(`The tutor can't see your screen, because nothing is being shared. ${again}`, { kind: 'error', ms: 12000 });
+      return;
+    }
     toast("Screen sharing has stopped, so the tutor can't see your screen any more. Start a new lesson in the Chalkside app to share it again.", {
       kind: 'error',
       ms: 12000,
@@ -1988,8 +2016,11 @@ function pickFileToShare() {
     return;
   }
   if (share.busy) return;
-  reopenPanel = ov.mode === 'panel';
-  setOvMode('bubble');
+  // On the tablet the floating window shrinks out of the way of Android's file picker.
+  if (!PC) {
+    reopenPanel = ov.mode === 'panel';
+    setOvMode('bubble');
+  }
   shareInput.click();
 }
 
@@ -2195,7 +2226,15 @@ async function boot() {
   if ('serviceWorker' in navigator && location.protocol === 'https:') {
     navigator.serviceWorker.register('sw.js').catch(() => {});
   }
-  if (SCREEN) {
+  if (PC) {
+    setupOverlay();
+    // On a tablet the settings are on the app's start screen; on a computer they're in the bar.
+    $('#ovSettings').hidden = false;
+    $('#ovSettings').addEventListener('click', () => openSettings());
+    // On a computer the window opens with the notes, and the tutor starts from the Start
+    // button: the browser lets a page start sound (and share the screen) only from a click.
+    setOvMode('panel');
+  } else if (SCREEN) {
     setupOverlay();
     // You started a lesson in the app, so the tutor starts straight away.
     startSession();
