@@ -6,7 +6,8 @@ import { InkPage, PEN_COLOURS, HL_COLOURS, SWATCH } from './ink.js';
 import { Board } from './board.js';
 import { AudioEngine } from './audio.js';
 import { LiveSession, isQuota } from './live.js';
-import { MODELS, VOICES, modelProfile, buildSystemPrompt, buildTools, ASKS, SCREEN_ASKS, PC_ASKS } from './prompt.js';
+import { MODELS, VOICES, modelProfile, buildSystemPrompt, buildTools, buildThinkerPrompt, ASKS, SCREEN_ASKS, PC_ASKS } from './prompt.js';
+import { THINKING_MODELS, thinkDeeply, splitAnswer, modelLabel } from './deep.js';
 import { pcBridge } from './pcbridge.js';
 import { diagramSVG } from './diagram.js';
 import { lessons } from './store.js';
@@ -58,6 +59,8 @@ const DEFAULTS = {
   replySpeed: 'quick',
   noisy: false,
   web: true, // pictures from Wikipedia
+  thinker: 'auto', // the slower model for think_deeply: 'auto' (newest Flash that's free), a model ID, 'custom' or 'off'
+  customThinker: '',
   autoSend: true,
   watch: true,
   layout: 'board-left',
@@ -653,6 +656,8 @@ const f = {
   replySpeed: $('#sReplySpeed'),
   noisy: $('#sNoisy'),
   web: $('#sWeb'),
+  thinker: $('#sThinker'),
+  customThinker: $('#sThinkerCustom'),
   autoSend: $('#sAutoSend'),
   layout: $('#sLayout'),
   grid: $('#sGrid'),
@@ -668,13 +673,24 @@ f.voice.replaceChildren(
   }),
 );
 
+f.thinker.querySelector('option[value="custom"]').before(
+  ...THINKING_MODELS.map((id) => {
+    const o = document.createElement('option');
+    o.value = id;
+    o.textContent = `${modelLabel(id)} only`;
+    return o;
+  }),
+);
+
 function syncModelRows() {
   const m = f.model.value;
   $('#sCustomRow').hidden = m !== 'custom';
   $('#sThinkRow').hidden = !(MODELS[m]?.thinking);
   $('#sModelBlurb').textContent = MODELS[m]?.blurb || 'Any Live API model ID your key can use.';
+  $('#sThinkerCustomRow').hidden = f.thinker.value !== 'custom';
 }
 f.model.addEventListener('change', syncModelRows);
+f.thinker.addEventListener('change', syncModelRows);
 
 $('#sKeyShow').addEventListener('click', (e) => {
   const show = f.key.type === 'password';
@@ -701,6 +717,9 @@ function openSettings(reason = '', { mic = false } = {}) {
   f.replySpeed.value = settings.replySpeed;
   f.noisy.checked = settings.noisy;
   f.web.checked = settings.web;
+  f.thinker.value = settings.thinker;
+  if (!f.thinker.value) f.thinker.value = 'auto'; // a model that has since left the list
+  f.customThinker.value = settings.customThinker;
   f.autoSend.checked = settings.autoSend;
   f.layout.value = settings.layout;
   f.grid.value = settings.grid;
@@ -738,6 +757,8 @@ settingsForm.addEventListener('submit', (e) => {
   settings.replySpeed = f.replySpeed.value;
   settings.noisy = f.noisy.checked;
   settings.web = f.web.checked;
+  settings.thinker = f.thinker.value;
+  settings.customThinker = f.customThinker.value.trim().replace(/^models\//, '');
   settings.autoSend = f.autoSend.checked;
   settings.layout = f.layout.value;
   settings.grid = f.grid.value;
@@ -760,7 +781,16 @@ settingsForm.addEventListener('submit', (e) => {
 
 function setupRelevant() {
   const { apiKey, model, customModel, thinkingLevel, voice, help, about, replySpeed, noisy, web } = settings;
-  return { apiKey, model, customModel, thinkingLevel, voice, help, about, replySpeed, noisy, web };
+  return { apiKey, model, customModel, thinkingLevel, voice, help, about, replySpeed, noisy, web, think: thinkers().length > 0 };
+}
+
+// The models think_deeply asks, in order: none when it's off.
+function thinkers() {
+  const t = settings.thinker;
+  if (t === 'off') return [];
+  if (t === 'custom') return settings.customThinker ? [settings.customThinker] : THINKING_MODELS;
+  if (t && t !== 'auto') return [t];
+  return THINKING_MODELS;
 }
 
 // ---- watch my working ------------------------------------------------------------------------
@@ -818,6 +848,9 @@ const S = {
   seen: { tablet: -1, pc: -1 }, // the newest picture of each screen at the last look, sent or not
   usage: null, // Gemini's newest token counts, logged when an answer ends
   sources: null, // this answer's line of web sources in the notes
+  workPicture: '', // the newest picture of the student's page, screen or shared file sent to the tutor
+  workFrom: '', // what that picture is: 'page', 'screen', 'pc' or 'file'
+  thinking: new Map(), // problems the slower model is thinking through: board block id → AbortController
 };
 
 const sessionActive = () => S.phase !== 'idle';
@@ -862,8 +895,8 @@ function buildSetup() {
   const setup = {
     model: `models/${profile.id}`,
     generationConfig,
-    systemInstruction: { parts: [{ text: buildSystemPrompt(settings, { screen: SCREEN, pc: PC }) }] },
-    tools: buildTools(profile, { screen: SCREEN, pc: PC, web: settings.web }),
+    systemInstruction: { parts: [{ text: buildSystemPrompt(settings, { screen: SCREEN, pc: PC, think: thinkers().length > 0 }) }] },
+    tools: buildTools(profile, { screen: SCREEN, pc: PC, web: settings.web, think: thinkers().length > 0 }),
     // Left to guess, the transcript of what you say sometimes comes out in another language.
     inputAudioTranscription: { languageCodes: ['en-GB'] },
     outputAudioTranscription: {},
@@ -1135,6 +1168,7 @@ function endSession({ quiet = false } = {}) {
   releaseWake();
   clearTimeout(S.awaitTimer);
   clearMicAlert();
+  for (const ctl of S.thinking.values()) ctl.abort(); // nobody to tell the answer to
   Object.assign(S, { tutorTalking: false, awaiting: false, hearing: false, dropAudio: false, pendingAsk: null, muted: false });
   finishTutorLine();
   S.youLine = null;
@@ -1164,6 +1198,7 @@ function updateStatus() {
   else if (S.phase === 'live') {
     if (S.tutorTalking) text = 'Tutor is talking';
     else if (S.awaiting) text = 'Thinking…';
+    else if (S.thinking.size) text = 'Working it through…';
     else if (S.muted) text = 'Mic off';
     else if (S.hearing) text = 'Listening…';
     else text = 'Listening';
@@ -1492,7 +1527,7 @@ const TOOLS = {
     // Show the tutor what the student now sees.
     let seen = false;
     try {
-      seen = await sendPicture(await pictureForTutor(pic.src));
+      seen = await sendPicture(await pictureForTutor(pic.src), { work: false });
       if (!SCREEN) S.lastFrameKey = ''; // send the page again before asking about it
     } catch {
       // The notes still have it.
@@ -1505,14 +1540,123 @@ const TOOLS = {
       note: seen ? "It is in the student's notes, and it is the newest image you have been sent." : "It is in the student's notes.",
     };
   },
+  // A hard problem, handed to a slower model that thinks it through (js/deep.js). Its working
+  // goes on the board, and comes back to the tutor to talk the student through.
+  async think_deeply(a) {
+    const question = String(a.question ?? '').trim();
+    if (!question) throw new Error('question was empty');
+    const models = thinkers();
+    if (!models.length) return { ok: false, error: 'Careful thinking is turned off in Settings. Work it out yourself, step by step on the board.' };
+    if (S.thinking.size >= 2) return { ok: false, error: 'Two problems are already being thought through. Wait for those first.' };
+    const goal = ['solve', 'check', 'hint'].includes(a.goal) ? a.goal : 'solve';
+    const pic = thinkerPicture();
+    const block = board.addWorked(a.title);
+    const stillThere = () => board.find(block.id)?.block === block; // not another lesson's block with the same id
+    const ctl = new AbortController();
+    S.thinking.set(block.id, ctl);
+    updateStatus();
+    const started = Date.now();
+    const secs = () => Math.round((Date.now() - started) / 1000);
+    const tick = setInterval(() => board.workedProgress(block.id, '', secs()), 1000);
+    try {
+      const { text, model } = await thinkDeeply({
+        apiKey: settings.apiKey,
+        models,
+        question: { system: buildThinkerPrompt(settings, goal), text: thinkerBrief(question, goal, pic), image: pic?.data },
+        signal: ctl.signal,
+        onThought: (heading) => board.workedProgress(block.id, heading, secs()),
+      });
+      const { board: written, tutor } = splitAnswer(text);
+      if (!written) throw new Error('the slower model wrote nothing for the board');
+      if (!stillThere()) return { ok: false, error: 'The student moved to another lesson before it was finished.' };
+      board.finishWorked(block.id, { content: written, model: modelLabel(model), seconds: secs() });
+      console.info(`[chalkside] thought through by ${model} in ${secs()} s`);
+      return {
+        ok: true,
+        id: block.id,
+        on_board: written,
+        notes_for_you: tutor,
+        note:
+          goal === 'hint'
+            ? "Only a hint is on the board. notes_for_you has the full answer, for you alone: use it to guide the student, but don't give it away."
+            : "This is on the board now. Don't read it out: tell the student it's there, explain the key idea in a sentence or two, and check they follow.",
+      };
+    } catch (err) {
+      if (stillThere()) board.removeBlock(block.id);
+      if (ctl.signal.aborted) return { ok: false, error: 'The lesson ended before it was finished.' };
+      console.warn('[chalkside] think_deeply failed:', err.reason || err.message);
+      toast(`Careful thinking didn't work: ${err.message}.`, { ms: 6000 });
+      return { ok: false, error: `The slower model couldn't help: ${err.message}. Work it out yourself, carefully, step by step on the board.` };
+    } finally {
+      clearInterval(tick);
+      S.thinking.delete(block.id);
+      updateStatus();
+    }
+  },
 };
+
+// The newest picture of the student's work for the slower model: their page or screen as it is
+// now, when the tutor may see it; otherwise the last one the tutor was shown.
+function thinkerPicture() {
+  if (canSee() && S.workFrom !== 'file') {
+    try {
+      if (!SCREEN) {
+        const snap = page.snapshot({ maxSide: 1600 });
+        return { data: snap.canvas.toDataURL('image/jpeg', 0.85).split(',')[1], from: 'page' };
+      }
+      const pc = S.workFrom === 'pc';
+      const fresh = newestPicture(pc ? 'pc' : 'tablet', true);
+      if (fresh) return { data: fresh.data, from: pc ? 'pc' : 'screen' };
+    } catch {
+      // The last one the tutor saw will do.
+    }
+  }
+  return S.workPicture ? { data: S.workPicture, from: S.workFrom } : null;
+}
+
+// What the slower model is told about the lesson: the request, what was just said, the board.
+function thinkerBrief(question, goal, pic) {
+  const said = transcript
+    .filter((e) => e.who === 'you' || e.who === 'tutor')
+    .slice(-8)
+    .map((e) => `${e.who === 'you' ? 'Student' : 'Tutor'}: ${cleanSpeech(e.text).trim().slice(0, 400)}`)
+    .filter((line) => !/:\s*$/.test(line));
+  const onBoard = board.summary(10).filter((line) => !/still being thought through/.test(line));
+  const shows = {
+    page: "the student's handwritten page",
+    screen: PC ? "the student's computer screen" : "the student's tablet screen",
+    pc: "the student's computer screen",
+    file: 'a file the student shared (a PDF page or a photo)',
+  };
+  return [
+    `The voice tutor asks (goal: ${goal}): ${question}`,
+    said.length ? `What was said just now, oldest first:\n${said.join('\n')}` : '',
+    onBoard.length ? `On the board already, newest last:\n${onBoard.join('\n')}` : 'The board is empty so far.',
+    pic ? `The picture shows ${shows[pic.from] || shows.page} as it is now.` : `There is no picture: the student isn't sharing their ${SCREEN ? 'screen' : 'page'} at the moment.`,
+  ]
+    .filter(Boolean)
+    .join('\n\n');
+}
+
+// A think_deeply answer that arrives after the connection that asked for it was replaced (Gemini's
+// ~10-minute limit): the new connection may not know about the call, so it's told in words.
+function tellLate(r) {
+  if (!S.live) return;
+  sendRaw(
+    r.ok
+      ? `[The careful working you asked think_deeply for has finished and is on the board as block #${r.id}. ${r.note} Notes for you: ${r.notes_for_you || 'none'}. It wrote: ${r.on_board}]`
+      : `[think_deeply couldn't finish: ${r.error}]`,
+  );
+}
 
 // Most tools answer at once, all together. Slow ones (fetching a picture) answer on their own when done.
 function handleToolCalls(calls, conn) {
   const profile = S.profile || modelProfile(settings);
+  // A failure, or careful working the tutor asked for, is something to talk about once it's free;
+  // the rest it takes in silently.
   const reply = (fc, response, failed) => {
     const r = { id: fc.id, name: fc.name, response };
-    if (profile.scheduling && !S.live?.stripped.has('scheduling')) r.scheduling = failed ? 'WHEN_IDLE' : 'SILENT';
+    if (profile.scheduling && !S.live?.stripped.has('scheduling')) r.scheduling = failed || fc.name === 'think_deeply' ? 'WHEN_IDLE' : 'SILENT';
     return r;
   };
   const send = (functionResponses) => {
@@ -1534,7 +1678,7 @@ function handleToolCalls(calls, conn) {
     }
     if (typeof result?.then === 'function') {
       result.then(
-        (response) => send([reply(fc, response, response.ok === false)]),
+        (response) => (fc.name === 'think_deeply' && conn?.closed ? tellLate(response) : send([reply(fc, response, response.ok === false)])),
         (err) => send([failure(fc, err)]),
       );
     } else {
@@ -1586,6 +1730,8 @@ function sendFrame({ force = false } = {}) {
   const snap = page.snapshot({ maxSide: 1024 });
   const data = snap.canvas.toDataURL('image/jpeg', 0.85).split(',')[1];
   if (!S.live.send({ realtimeInput: { video: { data, mimeType: 'image/jpeg' } } })) return false;
+  S.workPicture = data;
+  S.workFrom = 'page';
   S.lastFrameKey = key;
   S.lastFrameAt = now;
   S.lastFrameRect = snap.rect;
@@ -1620,6 +1766,8 @@ function sendScreenFrame(force, urgent = false) {
     S.seen[source] = frame.seq;
     if (!force && !urgent && !stopped && since < STEADY_MS) continue;
     if (!S.live.send({ realtimeInput: { video: { data: frame.data, mimeType: 'image/jpeg' } } })) return false;
+    S.workPicture = frame.data;
+    S.workFrom = source === 'pc' ? 'pc' : 'screen';
     if (source === 'pc') S.pcSeq = frame.seq;
     else S.screenSeq = frame.seq;
     S.lastFrameAt = now;
@@ -2125,7 +2273,8 @@ function labelPage(canvas, label) {
 }
 
 // One picture, at least a second after the last (the screen waits meanwhile). Rides out a reconnect.
-async function sendPicture(data) {
+// work: false for a picture that isn't the student's (one from Wikipedia).
+async function sendPicture(data, { work = true } = {}) {
   S.sharingFile = true;
   try {
     const wait = 1000 - (performance.now() - S.lastFrameAt);
@@ -2134,6 +2283,7 @@ async function sendPicture(data) {
       if (S.live?.send({ realtimeInput: { video: { data, mimeType: 'image/jpeg' } } })) {
         S.lastFrameAt = performance.now();
         S.lastImage = 'file';
+        if (work) Object.assign(S, { workPicture: data, workFrom: 'file' });
         return true;
       }
       if (S.phase !== 'reconnecting') return false;

@@ -5,6 +5,7 @@ A voice tutor for maths, coding and computer science, on a tablet or a PC. You t
 - sees your page (snapshots of what you've written, plus any photos or PDF pages you add)
 - talks you through it out loud
 - writes on a chalkboard beside your page as it talks, instead of reading things out: maths, steps, definitions, boxed answers, tables, graphs, code (coloured by language), diagrams (trees, graphs, automata, flowcharts) and pictures from Wikipedia
+- hands hard problems (proofs, tricky derivations, code that doesn't work) to a slower model that thinks them through, and puts that working on the board
 - marks your page like a teacher: green ticks on right lines, red circles round mistakes, short notes
 
 Everything runs in the browser. There's no server: the app connects straight from your tablet to Gemini using your own API key.
@@ -61,10 +62,23 @@ The page is `pc/index.html`. The tutor is this app in screen mode (`?overlay&pc`
 ## Models
 
 - **Fast** (`gemini-3.8-live`) is the default.
-- **Deep thinking** (`gemini-3.8-live-extended-thinking`) has been taken out. Every tool call it makes fails on Google's side, so the tutor says "a system error occurred" whenever it tries to write on the board (tested October 2026). Chalkside moves anyone who picked it back to Fast.
+- **Deep thinking** (`gemini-3.8-live-extended-thinking`) has been taken out. Every tool call it makes fails on Google's side, so the tutor says "a system error occurred" whenever it tries to write on the board (tested October 2026). Chalkside moves anyone who picked it back to Fast. Careful thinking (below) does that job instead.
 - **Another model ID** accepts any Live API model, for when Google releases new ones.
 
 If Google stops accepting a setting, the app retries without it and carries on. Long lessons survive Google's 10-minute connection limit because the app resumes the session automatically.
+
+### Careful thinking
+
+Fast answers quickly but can slip on anything subtle. So when a problem needs careful reasoning (a proof, a derivation of several steps, a recurrence, whether an algorithm is correct, a bug), it hands the problem to a slower Gemini Flash model with its thinking turned up, through a tool called `think_deeply`. That model sees the newest picture of your page or screen, what was just said and the board. It works the problem out and writes the working on the board as a **Worked through** block. Fast then talks you through it rather than reading it out. While it works, the block shows what it's thinking about, and Fast keeps talking to you.
+
+- It takes from about 20 seconds to 2 minutes, depending on how busy Google is.
+- **Newest Flash model that's free** (the default in Settings) asks Gemini 3.8 Flash first. If Google says that model is busy, or this key has used its allowance for it, the next one gets the question: 3.7, then 3.6, then 3.5. If one hasn't started answering after 30 seconds, the next is asked as well, and the first answer wins. The block says which model answered.
+- You can pick one model, type another model ID (Pro models need billing turned on), or turn careful thinking off.
+- It uses the key's normal Gemini allowance, which is separate from the live one.
+- If no model can answer, Fast says so and works the problem out itself.
+- With **Hints only** chosen in Settings, Fast asks it for just a hint for the board, and gets the full answer privately to guide you, unless you ask for the full solution.
+
+The code is in `js/deep.js`. With `?mock`, ask the fake tutor to "prove" something to see it work; `__mock.thinker` makes the fake model busy, out of allowance or slow.
 
 ## Try it on the PC first
 

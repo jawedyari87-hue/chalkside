@@ -19,10 +19,12 @@ const KIND_LABELS = {
   graph: 'Graph',
   picture: 'Picture',
   diagram: 'Diagram',
+  worked: 'Worked through',
 };
 
-// Blocks drawn by their own tools, which write_on_board can't make or rewrite.
-const DRAWN = new Set(['graph', 'picture', 'diagram']);
+// Blocks drawn by their own tools, which write_on_board can't make or rewrite. worked blocks
+// come from the slower model the tutor asks to think a problem through (think_deeply).
+const DRAWN = new Set(['graph', 'picture', 'diagram', 'worked']);
 
 const KIND_ALIASES = {
   yourturn: 'your_turn', 'your turn': 'your_turn', question: 'your_turn', exercise: 'your_turn', practice: 'your_turn', try: 'your_turn',
@@ -82,6 +84,8 @@ export class Board extends EventTarget {
   load(data) {
     const ok = data && Array.isArray(data.pages) && data.pages.length;
     this.data = ok ? structuredClone(data) : emptyBoard();
+    // Working that was still being thought through when the lesson closed won't arrive now.
+    for (const p of this.data.pages) p.blocks = p.blocks.filter((b) => !(b.kind === 'worked' && b.pending));
     this.data.nextId = Math.max(this.data.nextId || 1, 1 + Math.max(0, ...this.allBlocks().map((b) => b.id || 0)));
     this.data.nextPageId = Math.max(this.data.nextPageId || 2, 1 + Math.max(0, ...this.data.pages.map((p) => p.id || 0)));
     this.view = this.lastIndex;
@@ -105,6 +109,7 @@ export class Board extends EventTarget {
       if (b.kind === 'graph') what = `graph of ${(b.spec?.functions || []).map((f) => f.expr).join(', ')}`;
       if (b.kind === 'picture') what = `picture of ${b.pic?.title || b.query} from Wikipedia`;
       if (b.kind === 'diagram') what = `diagram: ${plainText(b.code, 200)}`;
+      if (b.kind === 'worked' && b.pending) what = '(still being thought through)';
       return `#${b.id} ${b.kind}${b.title ? ` "${b.title}"` : ''}: ${what}`;
     });
   }
@@ -209,6 +214,55 @@ export class Board extends EventTarget {
     this.changed();
   }
 
+  // Careful working from the slower model (think_deeply): in place straight away ("Working it
+  // through…"), with its progress, and filled in by finishWorked.
+  addWorked(title = '') {
+    this.leaveSample();
+    const block = { id: this.data.nextId++, kind: 'worked', title: repairLatex(String(title ?? '')).trim().slice(0, 120), content: '', pending: true, t: Date.now() };
+    this.current.blocks.push(block);
+    this.appendLatest(block);
+    this.announce(block, this.current, false);
+    this.changed();
+    return block;
+  }
+
+  // What it's thinking about now, in the board and the notes, without redrawing the block.
+  workedProgress(id, status, seconds) {
+    const found = this.find(id);
+    if (!found?.block.pending) return;
+    if (status) found.block.status = status;
+    for (const el of document.querySelectorAll(`.blk[data-id="${id}"] .blk__pending`)) {
+      el.querySelector('.blk__status').textContent = found.block.status || 'Thinking';
+      el.querySelector('.blk__secs').textContent = `${seconds} s`;
+    }
+  }
+
+  // The finished working. If the tutor has written more since it started, it moves to the end,
+  // where the student is looking.
+  finishWorked(id, { content, model, seconds }) {
+    const found = this.find(id);
+    if (!found) return null;
+    const { block } = found;
+    const text = repairLatex(String(content ?? '')).trim();
+    Object.assign(block, { content: text, model, seconds, pending: false });
+    delete block.status;
+    const page = this.data.pages[found.pageIndex];
+    if (found.pageIndex === this.lastIndex && page.blocks.at(-1) === block) {
+      if (found.pageIndex === this.view) this.rerender(block);
+      this.announce(block, page, true);
+    } else {
+      page.blocks = page.blocks.filter((b) => b !== block);
+      if (found.pageIndex === this.view) this.els.board.querySelector(`.blk[data-id="${id}"]`)?.remove();
+      this.dispatchEvent(new CustomEvent('removed', { detail: { id } }));
+      block.t = Date.now();
+      this.current.blocks.push(block);
+      this.appendLatest(block);
+      this.announce(block, this.current, false);
+    }
+    this.changed();
+    return { id, errors: renderRich(text).errors };
+  }
+
   // Take a block away again (a picture that couldn't be found).
   removeBlock(id) {
     const found = this.find(id);
@@ -264,6 +318,7 @@ export class Board extends EventTarget {
       const n = page.blocks.filter((b) => b.kind === 'step' && !b.title && b.id <= block.id).length;
       return `Step ${n}`;
     }
+    if (block.kind === 'worked' && block.pending) return 'Working it through';
     return KIND_LABELS[block.kind] || '';
   }
 
@@ -309,6 +364,13 @@ export class Board extends EventTarget {
     } else if (block.kind === 'diagram') {
       // Mermaid made this SVG in its strict mode, which strips scripts and links from labels.
       body = `<figure class="blk__diagram">${diagramCopy(block.svg, block.svgId)}</figure>`;
+    } else if (block.kind === 'worked' && block.pending) {
+      body = `<p class="blk__pending"><span class="blk__status">${escapeHtml(block.status || 'Thinking')}</span>… <span class="blk__secs"></span></p>`;
+    } else if (block.kind === 'worked') {
+      const r = renderRich(block.content);
+      errors = r.errors;
+      const by = block.model ? `<p class="blk__by">Thought through by ${escapeHtml(block.model)}${block.seconds ? ` in ${block.seconds} s` : ''}</p>` : '';
+      body = `<div class="blk__body">${r.html}</div>${by}`;
     } else {
       const r = renderRich(block.content);
       errors = r.errors;

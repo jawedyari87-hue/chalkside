@@ -107,7 +107,7 @@ export function isFatal(reason = '') {
 }
 
 // When Google's daily limits reset (midnight in California), as a time on this device's clock.
-function dailyReset() {
+export function dailyReset() {
   const now = new Date();
   const p = Object.fromEntries(
     new Intl.DateTimeFormat('en-US', { timeZone: 'America/Los_Angeles', hourCycle: 'h23', hour: 'numeric', minute: 'numeric', second: 'numeric' })

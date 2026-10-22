@@ -40,6 +40,11 @@ export function installMock() {
     keyAuth: 'ok',
     tokenAuth: 'ok',
     tokenMint: 'ok', // 'ok', 'fail' (HTTP 403) or 'network' (fetch throws, like a CORS block)
+    // The slower model behind think_deeply: 'ok', 'busy' (503), 'quota' (429), 'silent' (sends
+    // nothing for 40 s, like a queued request) or 'empty'; or per model, e.g. { 'gemini-3.8-flash': 'busy', '*': 'ok' }.
+    thinker: 'ok',
+    thinkMs: 3000,
+    thinks: [], // what the app asked it: { model, body }
     goAway() {
       this.active?._server({ goAway: { timeLeft: '5s' } });
     },
@@ -93,7 +98,18 @@ export function installMock() {
           this._reply(r.text);
         }
       }
-      if (msg.toolResponse) mock.toolResponses.push(msg.toolResponse);
+      if (msg.toolResponse) {
+        mock.toolResponses.push(msg.toolResponse);
+        // Careful working comes back WHEN_IDLE, and the tutor talks about it.
+        const fr = msg.toolResponse.functionResponses?.find((r) => r.name === 'think_deeply');
+        if (fr && fr.scheduling !== 'SILENT') this._afterThinking(fr.response);
+      }
+    }
+
+    async _afterThinking(r) {
+      await sleep(200);
+      await this._say(r?.ok ? "It's on the board now. The trick is to divide by n, which turns it into a simple sum. " : "I couldn't get the careful working, so let's do it together. ");
+      this._done();
     }
 
     close(code = 1000, reason = '') {
@@ -158,6 +174,18 @@ export function installMock() {
     async _reply(text) {
       await sleep(250);
       if (/stay completely silent/.test(text)) {
+        this._done();
+        return;
+      }
+      if (/^\[.*think_deeply/.test(text)) {
+        // The answer arrived after a reconnect, so the app said it in words.
+        await this._afterThinking({ ok: !/couldn't finish/.test(text) });
+        return;
+      }
+      if (/prove|properly|think (it )?through|recurrence/i.test(text)) {
+        await this._say('Let me work that through properly. ');
+        this._tool('think_deeply', { question: 'Q4 on the problem sheet: why case 2 of the master theorem fails for T(n) = 2T(n/2) + n log n, and a tight bound with proof.', goal: 'solve', title: 'Q4(b)' });
+        await this._say('While that works, what have you tried so far? ');
         this._done();
         return;
       }
@@ -290,8 +318,60 @@ export function installMock() {
       if (mock.tokenMint === 'fail') return json(403, { error: { code: 403, message: 'The caller does not have permission', status: 'PERMISSION_DENIED' } });
       return json(200, { name: `auth_tokens/mock-${mock.mints}`, uses: 1 });
     }
+    const think = /generativelanguage\.googleapis\.com\/v1beta\/models\/([^:/]+):streamGenerateContent/.exec(url);
+    if (think) return fakeThinker(decodeURIComponent(think[1]), init);
     return realFetch(input, init);
   };
+
+  // The slower model (think_deeply), streaming thought headings and then its answer, as Google
+  // sends them: "data: {...}" lines, split at awkward places.
+  async function fakeThinker(model, init) {
+    mock.thinks.push({ model, body: JSON.parse(init?.body || '{}') });
+    const plan = typeof mock.thinker === 'object' ? (mock.thinker[model] ?? mock.thinker['*'] ?? 'ok') : mock.thinker;
+    const json = (status, body) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
+    await sleep(80);
+    if (plan === 'busy') return json(503, { error: { code: 503, message: 'This model is currently experiencing high demand. Spikes in demand are usually temporary. Please try again later.', status: 'UNAVAILABLE' } });
+    if (plan === 'quota')
+      return json(429, {
+        error: {
+          code: 429,
+          message: 'You exceeded your current quota, please check your plan and billing details.',
+          status: 'RESOURCE_EXHAUSTED',
+          details: [{ '@type': 'type.googleapis.com/google.rpc.QuotaFailure', violations: [{ quotaId: 'GenerateRequestsPerDayPerProjectPerModel-FreeTier' }] }],
+        },
+      });
+    const sse = (parts) => `data: ${JSON.stringify({ candidates: [{ content: { parts, role: 'model' } }] })}\r\n\r\n`;
+    const answer = [
+      '**(a)** Here $a = b = 2$, so $n^{\\log_b a} = n$. Case 2 needs $f(n) = \\Theta(n)$, but $\\frac{n \\log_2 n}{n} = \\log_2 n \\to \\infty$.\n\n',
+      '**(b)**\n1. Divide by $n$:\n$$\\frac{T(n)}{n} = \\frac{T(n/2)}{n/2} + \\log_2 n$$\n2. With $n = 2^k$ and $S(k) = T(2^k)/2^k$: $S(k) = S(k-1) + k$, $S(0) = 1$.\n',
+      '3. So $S(k) = 1 + \\frac{k(k+1)}{2}$, and\n$$T(n) = n + \\tfrac{1}{2} n \\log_2 n \\,(\\log_2 n + 1)$$\n\n$$\\boxed{T(n) = \\Theta(n \\log^2 n)}$$\n\n',
+      'TUTOR: Dividing by n turns the recurrence into an arithmetic series, which is where the second log comes from.',
+    ].join('');
+    const step = mock.thinkMs / 4;
+    const stream = new ReadableStream({
+      async start(c) {
+        init?.signal?.addEventListener('abort', () => c.error(new DOMException('The user aborted a request.', 'AbortError')), { once: true });
+        const put = (s) => !init?.signal?.aborted && c.enqueue(enc.encode(s));
+        if (plan === 'silent') await sleep(40000);
+        for (const h of ['Analysing the recurrence', 'Checking the master theorem', 'Proving the bound']) {
+          await sleep(step);
+          put(sse([{ text: `**${h}**\n\nI'm working through ${h.toLowerCase()}.`, thought: true }]));
+        }
+        await sleep(step);
+        if (plan === 'empty') {
+          put(`data: ${JSON.stringify({ candidates: [{ finishReason: 'STOP' }] })}\r\n\r\n`);
+        } else {
+          const body = sse([{ text: answer }]);
+          const cut = Math.floor(body.length / 2); // a line split across two reads
+          put(body.slice(0, cut));
+          await sleep(30);
+          put(body.slice(cut));
+        }
+        if (!init?.signal?.aborted) c.close();
+      },
+    });
+    return new Response(stream, { status: 200, headers: { 'Content-Type': 'text/event-stream' } });
+  }
 
   // A quiet synthetic microphone, so the capture pipeline runs without a real one.
   // ?mock&realmic keeps the real microphone, to test audio routing on a device without using Gemini.

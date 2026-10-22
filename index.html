@@ -273,6 +273,15 @@
         <label class="field" id="sThinkRow" hidden><span>Thinking</span>
           <select id="sThink"><option value="LOW">Low</option><option value="MEDIUM">Medium</option><option value="HIGH">High (slowest)</option></select>
         </label>
+        <label class="field"><span>Careful thinking</span>
+          <select id="sThinker">
+            <option value="auto">Newest Flash model that's free (best)</option>
+            <option value="custom">Another model ID…</option>
+            <option value="off">Off</option>
+          </select>
+        </label>
+        <p class="help">For a hard problem the tutor asks a slower model that thinks it through, and puts the working on the board. It takes from about 20 seconds to 2 minutes, and uses your key's normal Gemini allowance, not the live one.</p>
+        <label class="field" id="sThinkerCustomRow" hidden><span>Thinking model ID</span><input id="sThinkerCustom" type="text" spellcheck="false" autocapitalize="off" placeholder="e.g. gemini-3.1-pro-preview"></label>
         <label class="field"><span>Voice</span><select id="sVoice"></select></label>
         <fieldset class="field field--radios">
           <legend>How much help</legend>

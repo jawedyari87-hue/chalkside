@@ -344,6 +344,11 @@ button:disabled { cursor: default; }
 .blk__pic figcaption { margin-top: 6px; font-size: 0.8em; color: var(--chalk-dim); }
 .blk__pic a { color: var(--chalk-blue); }
 .blk__pending { margin: 0; font-family: var(--font-hand); color: var(--chalk-dim); animation: breathe 1.4s ease-in-out infinite; }
+/* Careful working from the slower model (think_deeply), with a note of which model it was. */
+.blk--worked { padding-left: 14px; border-left: 3px solid color-mix(in srgb, var(--chalk-blue) 75%, transparent); }
+.blk--worked .blk__kind { color: var(--chalk-blue); }
+.blk__secs { font-family: var(--font-ui); font-size: 0.8em; font-variant-numeric: tabular-nums; }
+.blk__by { margin: 6px 0 0; font-size: 0.75em; color: var(--chalk-dim); }
 
 .blk.is-new { animation: chalk-in 0.75s ease-out both; }
 .blk--your_turn.is-new { animation: note-in 0.5s cubic-bezier(0.2, 0.9, 0.3, 1.2) both; }

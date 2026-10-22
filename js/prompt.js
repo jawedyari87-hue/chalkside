@@ -91,7 +91,46 @@ CODE AND COMPUTER SCIENCE
 - For algorithms and data structures, explain the idea first, then trace a small example step by step on the board. Give time and space complexity in big-O, with the reason.
 `;
 
-export function buildSystemPrompt(s, { screen = false, pc = false } = {}) {
+// Handing hard problems to a slower model that thinks them through (think_deeply, js/deep.js).
+function thinkRules(s, mode) {
+  return `
+THINKING IT THROUGH
+- You answer fast, so you can slip on anything subtle. When a problem needs careful reasoning (a proof, a derivation of several steps, a tricky integral, limit or probability, a recurrence or a complexity argument, whether an algorithm is correct, code that doesn't do what it should, an exam question with several parts), call think_deeply instead of working it out yourself. A slower model that thinks carefully works it out from the newest picture of their ${mode === 'page' ? 'page' : 'screen'} and writes the working on the board.
+- Say one short sentence first, such as "Let me work that through properly", then call it. It takes from about twenty seconds to two minutes. Meanwhile keep the student going: ask what they have tried, or talk about the idea behind the question. Don't write your own solution to the same problem meanwhile.
+- When it finishes, its working is already on the board. Don't read it out or write it again: tell the student it's there, explain the key idea in a sentence or two (its notes_for_you help), and check they follow.
+- goal: solve shows the full working; check checks the student's own working or code and shows where it first goes wrong; hint puts only a hint on the board and gives you the full answer privately, to guide them without giving it away.${s.help === 'hints' ? ' The student wants hints, so use hint unless they ask for the full solution.' : ''}
+- For quick things (arithmetic, a definition, the next simple step), answer yourself.
+`;
+}
+
+// What the slower model is told (think_deeply). goal: solve, check or hint.
+const THINK_GOALS = {
+  solve: 'The tutor wants the full worked answer on the board.',
+  check:
+    "The tutor wants the student's own working or code checked. Find the first mistake, quote the line, and say why it is wrong and what it should be. If everything is right, say so and confirm the answer. Don't redo the whole problem.",
+  hint: "The student wants to work it out themselves. On the board write only a hint for their next step, as a nudge or a question, never the answer. After TUTOR:, give the voice tutor the full worked answer as well, so it can check the student's next steps.",
+};
+
+export function buildThinkerPrompt(s, goal = 'solve') {
+  const about = String(s.about || '').trim();
+  return `You are the careful thinker behind Chalkside, a live voice tutor for a university student in the UK studying maths, programming and computer science. The voice tutor answers fast but can slip on anything subtle, so it hands you problems to work out properly. You get its request, a picture of what the student is looking at now (their screen or their handwritten page) when there is one, the last few things said, and what is already on the board.
+
+Work the problem out fully, and check your answer before you write anything. If the picture can't be read or the request is unclear, say so briefly instead of guessing.
+
+${THINK_GOALS[goal] || THINK_GOALS.solve}
+
+Write what goes on the student's board:
+- Markdown. Every piece of maths in LaTeX between $...$ (inline) or $$...$$ (displayed), never in code blocks. Code in \`\`\` fences with its language.
+- Short numbered steps, then the result as a boxed formula ($\\boxed{...}$) or a bold line.
+- For a bug: what is wrong and why (a short trace of a small example helps), then the corrected lines or function.
+- For a proof: what is being proved, then the proof.
+- No preamble, no closing remarks, no headings. As short as a good model answer: the voice tutor talks the student through it.
+- British English and UK conventions.
+
+Last, on a line of its own, write TUTOR: and then notes that only the voice tutor sees: one or two plain sentences with the key idea for it to say out loud, without symbols.${about ? `\n\nAbout the student, in their own words: ${about}` : ''}`;
+}
+
+export function buildSystemPrompt(s, { screen = false, pc = false, think = false } = {}) {
   const about = String(s.about || '').trim();
   const mode = pc ? 'pc' : screen ? 'screen' : 'page';
   return `You are Chalkside, a patient and expert private tutor for maths, programming and computer science. You are on a live voice call with a university student in the UK. ${SURFACES[mode]}
@@ -109,7 +148,7 @@ USING THE BOARD
 - Use new_board_page when you move to a different question or topic.
 - If something you wrote is wrong, correct it with write_on_board and replace_id, and tell the student you have fixed it.
 - Use plot_graph for a sketch of a function, and draw_diagram for trees, graphs and networks, automata, flowcharts, and sequence or class diagrams.
-- Tool results only confirm that something was drawn. Don't mention them, unless one reports a LaTeX or plotting error, in which case quietly fix it.
+- Tool results only confirm that something was drawn${think ? ' (except think_deeply, below)' : ''}. Don't mention them, unless one reports a LaTeX or plotting error, in which case quietly fix it.
 
 SPEAKING
 - Say maths the way a person would: "x squared plus three x", "the integral from nought to one", "dy by dx". Never read out LaTeX, Markdown or symbol names such as "dollar" or "backslash".
@@ -125,7 +164,7 @@ TEACHING
 - When they are confused by lecture notes or a model answer ${screen || pc ? 'on their screen' : 'they have added'}, explain the idea in plain words first, then show the steps on the board.
 - Be warm, encouraging and honest. Praise specific things they did well. Never be sarcastic.
 - Use British English and UK conventions: maths, brackets, nought, "dy by dx".
-${CODE_RULES}${s.web === false ? '' : WEB_RULES}
+${CODE_RULES}${think ? thinkRules(s, mode) : ''}${s.web === false ? '' : WEB_RULES}
 MESSAGES FROM THE APP
 - Text in [square brackets] comes from the app, not the student. Follow it quietly and never read it out.
 ${about ? `\nABOUT THE STUDENT (in their own words)\n${about}\n` : ''}`;
@@ -135,8 +174,9 @@ const STR = { type: 'STRING' };
 
 // With screen: true (the Android app) the tutor marks the student's screen instead of their page.
 // With pc: true (a computer screen) there is nothing to draw marks on, so it explains in words.
-// With web: true it can also show Wikipedia pictures.
-export function buildTools(profile, { screen = false, pc = false, web = false } = {}) {
+// With web: true it can also show Wikipedia pictures, and with think: true hand hard problems
+// to a slower model that thinks them through.
+export function buildTools(profile, { screen = false, pc = false, web = false, think = false } = {}) {
   const nb = profile.nonBlocking ? { behavior: 'NON_BLOCKING' } : {};
   const where = screen ? 'screen' : 'page';
   const tools = [
@@ -281,6 +321,30 @@ export function buildTools(profile, { screen = false, pc = false, web = false } 
     // No Google Search tool: on free keys it has its own small allowance, and once that is used
     // up Google refuses the whole lesson with "You exceeded your current quota", even though the
     // key itself still works (found 2026-10-18: the same key was accepted without it).
+  }
+  if (think) {
+    tools[0].functionDeclarations.push({
+      name: 'think_deeply',
+      ...nb,
+      description: `Hand a problem that needs careful reasoning to a slower model that thinks it through: proofs, derivations, tricky integrals or probability, recurrences and complexity, whether an algorithm is correct, code that doesn't work. It sees the newest picture of the student's ${screen || pc ? 'screen' : 'page'}, what was just said and the board, works the problem out, and writes the working on the board. It takes from about twenty seconds to two minutes; keep talking with the student meanwhile. Returns what it wrote on the board and notes for you, or an error, in which case work it out yourself.`,
+      parameters: {
+        type: 'OBJECT',
+        properties: {
+          question: {
+            ...STR,
+            description:
+              'The problem in full: what to work out or check, with any numbers, formulas, code or question text you can see, and what the student is stuck on. Example: "Q4(b) on the problem sheet on screen: find a tight bound for T(n) = 2T(n/2) + n log n and prove it."',
+          },
+          goal: {
+            ...STR,
+            enum: ['solve', 'check', 'hint'],
+            description: "solve (the default): show the full working. check: check the student's own working or code and show where it first goes wrong. hint: only a hint on the board; the full answer comes back to you alone.",
+          },
+          title: { ...STR, description: 'Short heading for the board, e.g. "Q4(b)" or "Why the merge loses numbers".' },
+        },
+        required: ['question'],
+      },
+    });
   }
   if (pc) {
     const decl = tools[0].functionDeclarations;
