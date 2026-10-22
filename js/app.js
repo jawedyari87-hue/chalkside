@@ -80,6 +80,16 @@ if ((savedSettings.version || 1) < 2) {
   settings.version = 2;
   saveSettings();
 }
+// The Deep thinking model (gemini-3.8-live-extended-thinking) fails every board tool on Google's
+// side: it says "a system error occurred" and the call never arrives (tested 2026-10-22, with a
+// bare-minimum setup and both ways of signing in). So it's gone from Settings, and anyone who
+// picked it goes back to Fast, with a note once the page is up.
+let movedOffThinking = false;
+if (settings.model === 'gemini-3.8-live-extended-thinking') {
+  settings.model = 'gemini-3.8-live';
+  saveSettings();
+  movedOffThinking = true;
+}
 
 // ---- elements --------------------------------------------------------------------
 
@@ -2229,6 +2239,9 @@ async function boot() {
 
   if (!window.isSecureContext) {
     toast('Open Chalkside from an https:// address (such as GitHub Pages) so the microphone works.', { kind: 'error', ms: 0 });
+  }
+  if (movedOffThinking && !APP_SETTINGS) {
+    toast("The tutor is back on the Fast model: Google's Deep thinking model can't write on the board at the moment.", { ms: 9000 });
   }
   if ('serviceWorker' in navigator && location.protocol === 'https:') {
     navigator.serviceWorker.register('sw.js').catch(() => {});

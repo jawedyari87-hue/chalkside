@@ -61,7 +61,7 @@ The page is `pc/index.html`. The tutor is this app in screen mode (`?overlay&pc`
 ## Models
 
 - **Fast** (`gemini-3.8-live`) is the default.
-- **Deep thinking** (`gemini-3.8-live-extended-thinking`) is slower but more careful, for proofs and long problems.
+- **Deep thinking** (`gemini-3.8-live-extended-thinking`) has been taken out. Every tool call it makes fails on Google's side, so the tutor says "a system error occurred" whenever it tries to write on the board (tested October 2026). Chalkside moves anyone who picked it back to Fast.
 - **Another model ID** accepts any Live API model, for when Google releases new ones.
 
 If Google stops accepting a setting, the app retries without it and carries on. Long lessons survive Google's 10-minute connection limit because the app resumes the session automatically.

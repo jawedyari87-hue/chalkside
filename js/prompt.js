@@ -8,13 +8,9 @@ export const MODELS = {
     scheduling: true,
     thinking: false,
   },
-  'gemini-3.8-live-extended-thinking': {
-    label: 'Deep thinking',
-    blurb: 'Slower to answer but reasons more carefully. For proofs and long problems.',
-    nonBlocking: true,
-    scheduling: false,
-    thinking: true,
-  },
+  // gemini-3.8-live-extended-thinking (Deep thinking) was here. Google's side fails every tool
+  // call it makes ("a system error occurred"), so it can't write on the board; app.js moves
+  // anyone who picked it back to Fast. Put it back when Google fixes that.
 };
 
 export function modelProfile(settings) {
