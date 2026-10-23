@@ -186,8 +186,8 @@ public class TutorService extends Service {
         running = true;
         stopped = false;
         if (pcLink == null) {
-            // Pictures of your PC's screen, if you've linked it (see PcLink).
-            pcLink = new PcLink(this);
+            // Your PC, if you've linked it: pictures of its screen, and the board shown there (see PcLink).
+            pcLink = new PcLink(this, this::sayFromPc);
             pcLink.start();
         }
         if (code == Activity.RESULT_OK && data != null) startCapture(code, data);
@@ -260,6 +260,13 @@ public class TutorService extends Service {
         MediaProjection p = projection;
         projection = null;
         if (p != null && stopProjection) p.stop();
+    }
+
+    // Something typed or tapped on the PC link page (JSON), for the page. Comes from PcLink's thread.
+    private void sayFromPc(String json) {
+        main.post(() -> {
+            if (overlay != null) overlay.say(json);
+        });
     }
 
     /** Lets the page end the lesson and save it first; stops anyway if it doesn't answer. */

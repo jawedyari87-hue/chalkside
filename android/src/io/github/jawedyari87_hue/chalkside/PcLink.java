@@ -29,30 +29,40 @@ import java.security.SecureRandom;
 import java.util.HashMap;
 import java.util.Locale;
 import java.util.Map;
+import java.util.function.Consumer;
 
 /**
- * Pictures of your PC's screen, sent by the Chalkside PC link page (tutor/pclink/index.html)
- * over the same Wi-Fi. During a lesson the tablet listens on port 8792 and takes a picture only
- * with the right code. The PC does the sending, so nothing on the PC has to accept connections.
+ * Your PC, linked over the same Wi-Fi by the Chalkside PC link page (tutor/pclink/index.html).
+ * The page sends pictures of the PC's screen, shows the tutor's board (so the tablet stays free
+ * for writing) and passes on what you type there. During a lesson the tablet listens on port 8792
+ * and answers only with the right code. The PC does the asking, so nothing on the PC has to accept
+ * connections.
  */
 final class PcLink {
     static final int PORT = 8792;
     private static final int MAX_BYTES = 4 * 1024 * 1024;
+    private static final int MAX_SAY_BYTES = 8 * 1024;
     private static final long LINKED_MS = 20_000; // heard from the PC this recently: linked
+    private static final long SHOWN_MS = 5_000; // the PC asked for the board this recently: it's showing it
 
     private static final long MAX_PIXELS = 12_000_000; // bigger than a 4K screen
 
     private final Context app;
+    private final Consumer<String> onSay; // something typed or tapped on the PC (JSON), for the page
+    private final long started = System.currentTimeMillis(); // tells the PC this is a new run of the app
     private volatile ServerSocket server;
     private volatile boolean stopped;
     private final Object lock = new Object();
     private int seq;
     private String json; // the newest picture, ready for the page
-    private volatile long heardAt;
+    private String board, live; // from the page: the board as HTML, and the captions and status (JSON)
+    private int boardV, liveV;
+    private volatile long heardAt, viewedAt;
     private final Map<String, int[]> failures = new HashMap<>(); // address -> {count, minute}
 
-    PcLink(Context ctx) {
+    PcLink(Context ctx, Consumer<String> onSay) {
         app = ctx.getApplicationContext();
+        this.onSay = onSay;
     }
 
     /** The code the PC page must send: made once, kept until you ask for a new one. */
@@ -110,6 +120,52 @@ final class PcLink {
         }
     }
 
+    /** The board for the PC to show: JSON from the page, passed on as it is. */
+    void setBoard(String boardJson) {
+        synchronized (lock) {
+            board = boardJson;
+            boardV++;
+        }
+    }
+
+    /** What the tutor is saying and doing now: JSON from the page, passed on as it is. */
+    void setLive(String liveJson) {
+        synchronized (lock) {
+            live = liveJson;
+            liveV++;
+        }
+    }
+
+    /** Whether the PC link page is showing the board. */
+    boolean boardShown() {
+        return SystemClock.uptimeMillis() - viewedAt < SHOWN_MS;
+    }
+
+    // The board and the live part, each only if it has changed since the version the PC has.
+    private String boardSince(int b, int l) {
+        synchronized (lock) {
+            return "{\"run\":" + started + ",\"b\":" + boardV + ",\"l\":" + liveV
+                    + ",\"board\":" + (board != null && b != boardV ? board : "null")
+                    + ",\"live\":" + (live != null && l != liveV ? live : "null") + "}";
+        }
+    }
+
+    // A number from the query string ("/board?b=3&l=7"), or -1.
+    private static int query(String path, String name) {
+        int q = path.indexOf('?');
+        if (q < 0) return -1;
+        for (String pair : path.substring(q + 1).split("&")) {
+            if (pair.startsWith(name + "=")) {
+                try {
+                    return Integer.parseInt(pair.substring(name.length() + 1));
+                } catch (NumberFormatException e) {
+                    return -1;
+                }
+            }
+        }
+        return -1;
+    }
+
     private void serve() {
         try (ServerSocket s = new ServerSocket()) {
             s.setReuseAddress(true);
@@ -132,7 +188,8 @@ final class PcLink {
         }
     }
 
-    // A tiny HTTP/1.1 server: OPTIONS (the browser's permission check), GET /hello and POST /frame.
+    // A tiny HTTP/1.1 server: OPTIONS (the browser's permission check), GET /hello, POST /frame,
+    // GET /board and POST /say.
     private void handle(Socket c) throws IOException {
         InputStream in = c.getInputStream();
         OutputStream out = c.getOutputStream();
@@ -191,6 +248,16 @@ final class PcLink {
             }
             heardAt = SystemClock.uptimeMillis();
             reply(out, store(body) ? 204 : 400, "text/plain", "");
+        } else if (method.equals("GET") && path.startsWith("/board")) {
+            viewedAt = SystemClock.uptimeMillis();
+            reply(out, 200, "application/json; charset=utf-8", boardSince(query(path, "b"), query(path, "l")));
+        } else if (method.equals("POST") && path.startsWith("/say")) {
+            if (body.length == 0 || body.length > MAX_SAY_BYTES) {
+                reply(out, 400, "text/plain", "Nothing to say, or too much.");
+                return;
+            }
+            onSay.accept(new String(body, StandardCharsets.UTF_8));
+            reply(out, 204, "text/plain", "");
         } else {
             reply(out, 404, "text/plain", "Not here.");
         }

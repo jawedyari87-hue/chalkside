@@ -10,6 +10,7 @@ import { MODELS, VOICES, modelProfile, buildSystemPrompt, buildTools, buildThink
 import { THINKING_MODELS, thinkDeeply, splitAnswer, modelLabel } from './deep.js';
 import { pcBridge } from './pcbridge.js';
 import { diagramSVG } from './diagram.js';
+import { highlightCode } from './codehl.js';
 import { lessons } from './store.js';
 import { openPdf, renderPdfPage, showThumbnails } from './pdfimport.js';
 import { renderInline } from './math.js';
@@ -625,7 +626,7 @@ board.addEventListener('block', (e) => {
     finishTutorLine();
   }
   notes.onBlock(block, page, replaced);
-  if (SCREEN && !replaced && ov.mode === 'bubble') {
+  if (SCREEN && !replaced && ov.mode === 'bubble' && !pcView.shown) {
     ov.unseen++;
     renderBadge();
   }
@@ -1922,6 +1923,91 @@ function setupOverlay() {
     volumeTimer();
   });
   setOvMode('bubble');
+  if (!PC) startPcView();
+}
+
+// ---- the board on your PC (the PC link page) ---------------------------------------------------
+//
+// With a PC linked, its PC link page can show the board, so the bar on the tablet can stay small
+// while you write. The app keeps the newest board page, drawn as here, and what the tutor is
+// saying and doing, for the PC to fetch. This only does the work while a PC is looking.
+
+const pcView = { dirty: true, shown: false, busy: false, live: '', drawn: new WeakMap() };
+
+function startPcView() {
+  if (typeof droid?.pcBoard !== 'function') return; // an older version of the app
+  board.addEventListener('change', () => (pcView.dirty = true));
+  setInterval(syncPcView, 300);
+}
+
+async function syncPcView() {
+  const shown = droid.pcBoardShown();
+  if (shown && !pcView.shown) pcView.dirty = true; // a PC has started looking: give it everything
+  pcView.shown = shown;
+  if (!shown || pcView.busy) return;
+  pcView.busy = true;
+  try {
+    if (pcView.dirty) {
+      pcView.dirty = false;
+      droid.pcBoard(JSON.stringify(await boardForPc()));
+    }
+    const live = JSON.stringify(liveForPc());
+    if (live !== pcView.live) {
+      pcView.live = live;
+      droid.pcLive(live);
+    }
+  } catch (err) {
+    console.warn('[chalkside] board for the PC:', err?.message || err);
+  } finally {
+    pcView.busy = false;
+  }
+}
+
+// The newest board page, each block drawn just as on the board (kept until the block changes).
+async function boardForPc() {
+  const page = board.current;
+  const blocks = [];
+  for (const b of page.sample ? [] : page.blocks) {
+    const sig = JSON.stringify(b, (k, v) => (k === 'status' || k === 'secs' ? undefined : v));
+    let drawn = pcView.drawn.get(b);
+    if (drawn?.sig !== sig) {
+      const box = document.createElement('div');
+      box.append(board.renderBlock(b, page, false).el);
+      await highlightCode(box);
+      drawn = { sig, html: box.innerHTML };
+      pcView.drawn.set(b, drawn);
+    }
+    blocks.push({ id: b.id, html: drawn.html });
+  }
+  return {
+    site: new URL('.', location.href).href, // where the PC gets the board's look from
+    lesson: lessonTitleEl.textContent,
+    page: { n: board.lastIndex + 1, title: page.sample ? '' : page.title || '' },
+    blocks,
+  };
+}
+
+// What the tutor is saying and doing, and how far any careful working has got.
+function liveForPc() {
+  return {
+    phase: S.phase,
+    status: statusText.textContent,
+    you: capYou.textContent,
+    tutor: capTutor.textContent,
+    thinking: board.current.blocks.filter((b) => b.kind === 'worked' && b.pending).map((b) => ({ id: b.id, status: b.status || 'Thinking', secs: b.secs || 0 })),
+  };
+}
+
+// Something typed or tapped on the PC link page: { text } or { ask: 'check' }.
+function sayFromPc(json) {
+  let m;
+  try {
+    m = JSON.parse(json);
+  } catch {
+    return;
+  }
+  if (typeof m?.ask === 'string' && Object.hasOwn(asks, m.ask)) ask(m.ask);
+  else if (typeof m?.text === 'string' && m.text.trim()) ask(m.text.trim().slice(0, 2000));
 }
 
 function setOvMode(mode) {
@@ -2004,8 +2090,9 @@ function overlayToast(message, { kind, actionLabel }) {
 }
 
 // Messages from the Android app.
-function onNative(type) {
+function onNative(type, arg) {
   if (type === 'stop') closeOverlay();
+  else if (type === 'say') sayFromPc(arg);
   else if (type === 'blur') document.activeElement?.blur?.(); // you tapped another app, or Back, while typing
   else if (type === 'marks-cleared') showMarksButton(false); // you scrolled, switched app or turned the tablet
   else if (type === 'screen-started') {

@@ -231,6 +231,7 @@ export class Board extends EventTarget {
     const found = this.find(id);
     if (!found?.block.pending) return;
     if (status) found.block.status = status;
+    found.block.secs = seconds;
     for (const el of document.querySelectorAll(`.blk[data-id="${id}"] .blk__pending`)) {
       el.querySelector('.blk__status').textContent = found.block.status || 'Thinking';
       el.querySelector('.blk__secs').textContent = `${seconds} s`;
@@ -246,6 +247,7 @@ export class Board extends EventTarget {
     const text = repairLatex(String(content ?? '')).trim();
     Object.assign(block, { content: text, model, seconds, pending: false });
     delete block.status;
+    delete block.secs;
     const page = this.data.pages[found.pageIndex];
     if (found.pageIndex === this.lastIndex && page.blocks.at(-1) === block) {
       if (found.pageIndex === this.view) this.rerender(block);

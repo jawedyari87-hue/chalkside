@@ -31,11 +31,11 @@ function hljs() {
   return loading;
 }
 
-// Colour the code blocks inside an element (on the board, or in the notes).
+// Colour the code blocks inside an element (on the board, or in the notes). Resolves when done.
 export function highlightCode(root) {
   const blocks = [...root.querySelectorAll('pre code:not(.hljs)')];
-  if (!blocks.length) return;
-  hljs()
+  if (!blocks.length) return Promise.resolve();
+  return hljs()
     .then((h) => {
       for (const b of blocks) {
         // A language highlight.js doesn't know: let it guess instead of warning.

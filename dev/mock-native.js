@@ -28,6 +28,13 @@ export function installMockNative() {
   draw();
 
   const log = (...call) => state.calls.push(call);
+  const relay = typeof BroadcastChannel === 'function' ? new BroadcastChannel('chalkside-pclink-test') : null;
+  if (relay) {
+    relay.onmessage = (e) => {
+      if (typeof e.data?.viewer === 'boolean') state.pcViewer = e.data.viewer;
+      if (typeof e.data?.say === 'string') window.chalksideNative?.('say', e.data.say);
+    };
+  }
   window.ChalksideAndroid = {
     info: () => JSON.stringify({ version: 1, screen: true }),
     // The newest picture if it is newer than `since` (-1: the newest, whatever it is).
@@ -75,6 +82,18 @@ export function installMockNative() {
       return JSON.stringify(state.pc);
     },
     pcLinked: () => !!state.pc,
+    // The board for the PC link page. A PC is "looking" while state.pcViewer is true. What the
+    // page hands over is kept, and goes out on a BroadcastChannel, so a test page on this origin
+    // can serve it to the PC link page, and pass back what's typed there (__native.say).
+    pcBoard(json) {
+      state.pcBoard = json;
+      relay?.postMessage({ board: json });
+    },
+    pcLive(json) {
+      state.pcLive = json;
+      relay?.postMessage({ live: json });
+    },
+    pcBoardShown: () => !!state.pcViewer,
     openSettings: () => log('openSettings'),
     settingsClosed: (hasKey) => log('settingsClosed', hasKey),
     stop: () => log('stop'),
@@ -88,6 +107,8 @@ export function installMockNative() {
     },
     // A message from the app: 'stop', 'blur', 'screen-stopped', 'screen-started', 'marks-cleared' or 'settings'.
     send: (type) => window.chalksideNative?.(type),
+    // Something typed or tapped on the PC link page, as the app passes it on.
+    say: (json) => window.chalksideNative?.('say', json),
     // A new picture of the linked PC's screen.
     pcPicture() {
       const c = document.createElement('canvas');

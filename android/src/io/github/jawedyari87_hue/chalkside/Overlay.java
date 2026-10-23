@@ -31,6 +31,8 @@ import android.webkit.WebView;
 import android.widget.FrameLayout;
 import android.widget.Toast;
 
+import org.json.JSONObject;
+
 /**
  * The floating window over other apps. It holds the web app in overlay mode (?overlay): a small
  * bar that the page sizes to fit, which opens into a panel of everything the tutor says and writes.
@@ -169,6 +171,13 @@ final class Overlay {
     void send(String type) {
         main.post(() -> {
             if (attached) web.evaluateJavascript("window.chalksideNative&&chalksideNative('" + type + "')", null);
+        });
+    }
+
+    /** Something typed or tapped on the PC link page (JSON), passed to the page as a string. */
+    void say(String json) {
+        main.post(() -> {
+            if (attached) web.evaluateJavascript("window.chalksideNative&&chalksideNative('say'," + JSONObject.quote(json) + ")", null);
         });
     }
 
@@ -500,6 +509,27 @@ final class Overlay {
         public boolean pcLinked() {
             PcLink p = service.pcLink();
             return p != null && p.linked();
+        }
+
+        /** The board for the PC link page to show (JSON). */
+        @JavascriptInterface
+        public void pcBoard(String json) {
+            PcLink p = service.pcLink();
+            if (p != null) p.setBoard(json);
+        }
+
+        /** The captions and status for the PC link page (JSON). */
+        @JavascriptInterface
+        public void pcLive(String json) {
+            PcLink p = service.pcLink();
+            if (p != null) p.setLive(json);
+        }
+
+        /** Whether the PC link page is showing the board, so the bar needn't count new notes. */
+        @JavascriptInterface
+        public boolean pcBoardShown() {
+            PcLink p = service.pcLink();
+            return p != null && p.boardShown();
         }
 
         @JavascriptInterface
