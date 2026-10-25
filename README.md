@@ -35,7 +35,8 @@ Tips:
 - **Board on the left** suits right-handed writers, so your palm doesn't cover the board. Swap sides in Settings if you're left-handed.
 - With the S Pen in use, a finger scrolls the page and the pen writes. Hold the S Pen button to erase.
 - **Check my work** sends the tutor your page and asks it to mark it. **Watch my working** (top bar) lets the tutor speak up when it spots a mistake as you write.
-- Add a question or lecture slide with the **picture** or **PDF** buttons, then ask about it.
+- Add a question or lecture slide with the **picture** or **PDF** buttons, then ask about it. Both take several files at once: pictures go one under another, and you pick the pages of each PDF in turn.
+- The **paperclip** next to the typing box shows the tutor files without putting them on your page: pictures, whole PDFs, and **code** in any language (Python, Java, C, C++, JavaScript, a Jupyter notebook, SQL, and so on) or other text files. Pick several at once (up to 10). Code goes over as text, which the tutor reads exactly, with line numbers added so it can say "line 14" as your editor does; long files are cut at about 440 lines, and the tutor is told to ask about the rest. Careful thinking gets the code too.
 - Lessons save on the tablet. Open **Lessons** (top left) to name them, go back to old ones, or start a new one.
 - Tap **Expand** on the board (or the captions strip) to read everything the tutor says, word by word as it talks, with its written maths in between, full screen and in large text. **A−/A+** change the size.
 - **Reply speed** in Settings is *Quick* by default, so the tutor answers after a short pause, like Gemini Live. Choose *Patient* if it keeps cutting in while you're thinking aloud.

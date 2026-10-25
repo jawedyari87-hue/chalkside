@@ -159,6 +159,7 @@
           <button type="button" class="ask-chip" data-ask="summary">Summarise</button>
         </div>
         <form class="type-ask" id="typeForm" autocomplete="off">
+          <button type="button" class="btn btn--sm btn--attach" id="pageShareBtn" aria-label="Show the tutor files: pictures, PDFs or code" title="Show the tutor files: pictures, PDFs or code (Python, Java and so on)"><svg class="ic"><use href="#i-clip"/></svg></button>
           <input id="typeInput" type="text" placeholder="Type to the tutor…" aria-label="Type a message to the tutor" enterkeyhint="send">
           <button type="submit" class="btn btn--chalk btn--sm" aria-label="Send"><svg class="ic"><use href="#i-send"/></svg></button>
         </form>
@@ -231,7 +232,7 @@
         <button type="button" class="ask-chip" data-ask="summary">Summarise</button>
       </div>
       <form class="type-ask" id="notesTypeForm" autocomplete="off">
-        <button type="button" class="btn btn--sm btn--attach" id="shareBtn" aria-label="Show the tutor a file: pages of a PDF, or a picture" hidden><svg class="ic"><use href="#i-clip"/></svg></button>
+        <button type="button" class="btn btn--sm btn--attach" id="shareBtn" aria-label="Show the tutor files: pictures, PDFs or code" title="Show the tutor files: pictures, PDFs or code (Python, Java and so on)" hidden><svg class="ic"><use href="#i-clip"/></svg></button>
         <input id="notesTypeInput" type="text" placeholder="Type to the tutor…" aria-label="Type a message to the tutor" enterkeyhint="send">
         <button type="submit" class="btn btn--chalk btn--sm" aria-label="Send"><svg class="ic"><use href="#i-send"/></svg></button>
       </form>
@@ -368,9 +369,11 @@
   </div>
 </dialog>
 
-<input type="file" id="imageInput" accept="image/*" hidden>
-<input type="file" id="pdfInput" accept="application/pdf,.pdf" hidden>
-<input type="file" id="shareInput" accept="image/*,application/pdf,.pdf" hidden>
+<input type="file" id="imageInput" accept="image/*" multiple hidden>
+<input type="file" id="pdfInput" accept="application/pdf,.pdf" multiple hidden>
+<!-- Pictures, PDFs, and code or text of any kind. On Android the picker goes by type, and code files
+     often have none it knows (application/octet-stream), so that's allowed too; app.js checks each file. -->
+<input type="file" id="shareInput" multiple hidden accept="image/*,application/pdf,.pdf,text/*,application/json,application/javascript,application/x-javascript,application/xml,application/x-sh,application/sql,application/x-ipynb+json,application/octet-stream,video/mp2t,.py,.ipynb,.java,.c,.h,.cpp,.cc,.hpp,.cs,.js,.mjs,.ts,.tsx,.jsx,.kt,.swift,.go,.rs,.rb,.php,.scala,.hs,.ml,.r,.jl,.m,.lua,.pl,.pro,.sh,.ps1,.bat,.sql,.html,.css,.json,.xml,.yaml,.yml,.toml,.md,.tex,.csv,.txt,.asm,.s,.v,.sv,.vhd,.dart,.ex,.erl,.clj,.lisp,.scm,.rkt,.f90">
 <div class="ov-grip" id="ovGrip" aria-hidden="true"></div>
 <div class="toasts" id="toasts" aria-live="polite"></div>
 <div class="print-sheet" id="printSheet"></div>

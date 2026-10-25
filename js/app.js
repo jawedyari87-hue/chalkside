@@ -276,10 +276,11 @@ async function addImageFile(file) {
 
 const imageInput = $('#imageInput');
 $('#addImageBtn').addEventListener('click', () => imageInput.click());
-imageInput.addEventListener('change', () => {
-  const f = imageInput.files?.[0];
+// Several at once go one under another.
+imageInput.addEventListener('change', async () => {
+  const files = [...(imageInput.files || [])];
   imageInput.value = '';
-  if (f) addImageFile(f);
+  for (const f of files) await addImageFile(f);
 });
 
 document.addEventListener('paste', (e) => {
@@ -296,21 +297,24 @@ const pdfDlg = $('#pdfDlg');
 const pdfGrid = $('#pdfGrid');
 const pdfAdd = $('#pdfAdd');
 $('#addPdfBtn').addEventListener('click', () => pdfInput.click());
-pdfInput.addEventListener('change', () => {
-  const f = pdfInput.files?.[0];
+// Several PDFs: their pages are picked one PDF after another.
+pdfInput.addEventListener('change', async () => {
+  const files = [...(pdfInput.files || [])];
   pdfInput.value = '';
-  if (!f) return;
-  choosePdfPages(f, { verb: 'Add', busy: 'Adding…', help: 'Tap the pages to add to your page. The tutor will see them too.' }, async (pdf, pages) => {
-    for (const n of pages) {
-      const c = await renderPdfPage(pdf, n, 1600);
-      page.addImage({ src: c.toDataURL('image/jpeg', 0.86), width: c.width, height: c.height });
-    }
-    toast(pages.length > 1 ? `Added ${pages.length} pages.` : 'Page added.', { ms: 3000 });
-  });
+  for (const f of files) {
+    await choosePdfPages(f, { verb: 'Add', busy: 'Adding…', help: 'Tap the pages to add to your page. The tutor will see them too.' }, async (pdf, pages) => {
+      for (const n of pages) {
+        const c = await renderPdfPage(pdf, n, 1600);
+        page.addImage({ src: c.toDataURL('image/jpeg', 0.86), width: c.width, height: c.height });
+      }
+      toast(pages.length > 1 ? `Added ${pages.length} pages.` : 'Page added.', { ms: 3000 });
+    });
+  }
 });
 
-// Pick pages of a PDF in the page dialog, then onPick(pdf, pageNumbers).
+// Pick pages of a PDF in the page dialog, then onPick(pdf, pageNumbers). Resolves when the dialog closes.
 async function choosePdfPages(file, { verb, busy, help }, onPick) {
+  const closed = new Promise((done) => pdfDlg.addEventListener('close', done, { once: true }));
   $('#pdfTitle').textContent = file.name.replace(/\.pdf$/i, '');
   $('#pdfHelp').textContent = help;
   pdfGrid.innerHTML = '<p class="help">Opening the PDF…</p>';
@@ -322,7 +326,7 @@ async function choosePdfPages(file, { verb, busy, help }, onPick) {
     pdf = await openPdf(file);
   } catch (err) {
     pdfGrid.innerHTML = `<p class="help">${escapeHtml(err.message || 'That PDF could not be opened.')}</p>`;
-    return;
+    return closed;
   }
   const selected = showThumbnails(pdf, pdfGrid, (n) => {
     pdfAdd.disabled = n === 0;
@@ -338,8 +342,9 @@ async function choosePdfPages(file, { verb, busy, help }, onPick) {
       toast(err.message || 'Those pages could not be used.', { kind: 'error' });
     }
     pdfDlg.close();
-    pdf.destroy?.();
   };
+  await closed;
+  pdf.destroy?.();
 }
 
 // ---- board controls ----------------------------------------------------------------
@@ -853,6 +858,7 @@ const S = {
   sources: null, // this answer's line of web sources in the notes
   workPicture: '', // the newest picture of the student's page, screen or shared file sent to the tutor
   workFrom: '', // what that picture is: 'page', 'screen', 'pc' or 'file'
+  sharedCode: null, // { t, text }: the code files the student shared last, numbered, for careful thinking
   thinking: new Map(), // problems the slower model is thinking through: board block id → AbortController
 };
 
@@ -1633,10 +1639,13 @@ function thinkerBrief(question, goal, pic) {
     pc: PC ? "the student's second screen (Screen 2)" : "the student's computer screen",
     file: 'a file the student shared (a PDF page or a photo)',
   };
+  // Code they shared in the last couple of hours, which the picture won't show.
+  const code = S.sharedCode && Date.now() - S.sharedCode.t < 2 * 3600 * 1000 ? S.sharedCode.text : '';
   return [
     `The voice tutor asks (goal: ${goal}): ${question}`,
     said.length ? `What was said just now, oldest first:\n${said.join('\n')}` : '',
     onBoard.length ? `On the board already, newest last:\n${onBoard.join('\n')}` : 'The board is empty so far.',
+    code ? `Files the student shared as text, with line numbers added (the numbers and the | are not part of the files):\n\n${code}` : '',
     pic ? `The picture shows ${shows[pic.from] || shows.page} as it is now.` : `There is no picture: the student isn't sharing their ${SCREEN ? 'screen' : 'page'} at the moment.`,
   ]
     .filter(Boolean)
@@ -1908,13 +1917,6 @@ function setupOverlay() {
   toast.hook = overlayToast;
   window.chalksideNative = onNative;
   $('#shareBtn').hidden = false;
-  $('#shareBtn').addEventListener('click', pickFileToShare);
-  shareInput.addEventListener('change', onShareFile);
-  shareInput.addEventListener('cancel', reopenAfterPick);
-  $('#shareStop').addEventListener('click', () => {
-    share.stop = true;
-    $('#shareStop').hidden = true;
-  });
   $('#ovMarks').addEventListener('click', () => {
     droid?.clearMarks();
     showMarksButton(false);
@@ -2256,25 +2258,57 @@ function showMarksButton(on) {
   $('#ovMarks').hidden = !on;
 }
 
-// ---- showing the tutor a file: a whole PDF, or a picture (Android app) -------------------------
+// ---- showing the tutor files: pictures, whole PDFs, and code -------------------------------------
 //
-// The Live API takes pictures, not documents, so a PDF goes over as a picture of each page,
-// about one a second (the same way as the screen), then a note saying what they were.
+// The Live API takes pictures and text, not documents. So a PDF goes over as a picture of each
+// page, about one a second (the same way as the screen); a picture as itself; and code or any
+// other text file as text, which the tutor reads exactly, with line numbers added so it can say
+// "line 14" as the student's editor does. Several files can go at once, followed by one note
+// saying what they all were.
 
 const shareInput = $('#shareInput');
-const SHARE_MAX_PAGES = 60;
+const SHARE_MAX_PAGES = 60; // pages of all the PDFs in one go
+const SHARE_MAX_FILES = 10;
+const CODE_MAX_CHARS = 24000; // about 6,000 tokens: the conversation the tutor re-reads is kept short
+const CODE_TOTAL_CHARS = 48000;
 const share = { busy: false, stop: false };
 let reopenPanel = false;
+
+// Code and text files the tutor can read, by extension (or by name, for files like Makefile).
+const CODE_LANGS = {
+  py: 'Python', pyw: 'Python', ipynb: 'Python notebook', java: 'Java', c: 'C', h: 'C header', cpp: 'C++', cc: 'C++', cxx: 'C++', hpp: 'C++ header',
+  cs: 'C#', js: 'JavaScript', mjs: 'JavaScript', cjs: 'JavaScript', jsx: 'JavaScript', ts: 'TypeScript', tsx: 'TypeScript', kt: 'Kotlin', kts: 'Kotlin',
+  swift: 'Swift', go: 'Go', rs: 'Rust', rb: 'Ruby', php: 'PHP', scala: 'Scala', dart: 'Dart', hs: 'Haskell', lhs: 'Haskell', ml: 'OCaml', mli: 'OCaml',
+  fs: 'F#', ex: 'Elixir', exs: 'Elixir', erl: 'Erlang', clj: 'Clojure', lisp: 'Lisp', scm: 'Scheme', rkt: 'Racket', r: 'R', jl: 'Julia',
+  m: 'MATLAB or Objective-C', lua: 'Lua', pl: 'Perl or Prolog', pro: 'Prolog', f90: 'Fortran', f: 'Fortran', asm: 'assembly', s: 'assembly',
+  v: 'Verilog', sv: 'SystemVerilog', vhd: 'VHDL', vhdl: 'VHDL', sh: 'shell script', bash: 'shell script', zsh: 'shell script', ps1: 'PowerShell',
+  bat: 'batch file', cmd: 'batch file', sql: 'SQL', html: 'HTML', htm: 'HTML', css: 'CSS', scss: 'SCSS', json: 'JSON', xml: 'XML', yaml: 'YAML',
+  yml: 'YAML', toml: 'TOML', ini: 'settings file', cfg: 'settings file', md: 'Markdown', tex: 'LaTeX', bib: 'BibTeX', csv: 'CSV', tsv: 'TSV',
+  txt: 'text', log: 'log', gradle: 'Gradle', cmake: 'CMake', mk: 'Makefile', makefile: 'Makefile', dockerfile: 'Dockerfile',
+};
+
+const fileExt = (name) => {
+  const base = name.toLowerCase().split(/[\\/]/).pop();
+  return base.includes('.') ? base.split('.').pop() : base;
+};
+
+function fileKind(file) {
+  const name = file.name || '';
+  if (/pdf$/i.test(file.type) || /\.pdf$/i.test(name)) return 'pdf';
+  if (/^image\//i.test(file.type) || /\.(png|jpe?g|webp|gif|bmp)$/i.test(name)) return 'picture';
+  if (CODE_LANGS[fileExt(name)] || /^text\//i.test(file.type) || /json|javascript|xml|x-sh|sql/i.test(file.type)) return 'code';
+  return 'unknown'; // read it, and use it if it turns out to be text
+}
 
 // The panel shrinks to the bar while Android's file picker is open, and opens again afterwards.
 function pickFileToShare() {
   if (!sessionActive()) {
-    toast('Start the tutor first, then show it a file.', { ms: 4000 });
+    toast('Start the tutor first, then show it files.', { ms: 4000 });
     return;
   }
   if (share.busy) return;
   // On the tablet the floating window shrinks out of the way of Android's file picker.
-  if (!PC) {
+  if (SCREEN && !PC) {
     reopenPanel = ov.mode === 'panel';
     setOvMode('bubble');
   }
@@ -2287,63 +2321,176 @@ function reopenAfterPick() {
 }
 
 async function onShareFile() {
-  const file = shareInput.files?.[0];
+  const files = [...(shareInput.files || [])];
   shareInput.value = '';
   reopenAfterPick();
-  if (!file || share.busy) return;
+  if (!files.length || share.busy) return;
   if (S.phase !== 'live' || !S.live) {
-    toast('The tutor is not connected. Start it, then show it the file again.', { kind: 'error' });
+    toast('The tutor is not connected. Start it, then show it the files again.', { kind: 'error' });
     return;
   }
-  const name = file.name || 'your file';
+  if (files.length > SHARE_MAX_FILES) toast(`That's ${files.length} files: the tutor gets the first ${SHARE_MAX_FILES}.`, { ms: 5000 });
   share.busy = true;
   share.stop = false;
-  $('#shareBtn').disabled = true;
+  setShareButtons(true);
+  const shown = []; // what went over as pictures, in order
+  const code = []; // and as text
+  const labels = [];
+  let images = 0;
+  let budget = CODE_TOTAL_CHARS;
   try {
-    if (/pdf$/i.test(file.type) || /\.pdf$/i.test(name)) await sharePdf(file, name);
-    else if (/^image\//i.test(file.type) || /\.(png|jpe?g|webp|gif|bmp)$/i.test(name)) await sharePicture(file, name);
-    else toast('Choose a PDF or a picture.', { ms: 4000 });
-  } catch (err) {
-    toast(err.message || "That file couldn't be opened.", { kind: 'error' });
+    for (const file of files.slice(0, SHARE_MAX_FILES)) {
+      if (share.stop) break;
+      const name = file.name || 'a file';
+      const kind = fileKind(file);
+      try {
+        if (kind === 'pdf') {
+          const r = await sharePdf(file, name, SHARE_MAX_PAGES - images);
+          if (r) {
+            shown.push(r.desc);
+            labels.push(r.label);
+            images += r.images;
+          }
+        } else if (kind === 'picture') {
+          await sharePicture(file, name);
+          shown.push(`the picture ${name}`);
+          labels.push(name);
+          images += 1;
+        } else {
+          if (budget < 400) {
+            toast(`That's a lot of code at once, so ${name} was left out. Share it on its own.`, { ms: 6000 });
+            continue;
+          }
+          shareStatus(`Reading ${name}…`);
+          const c = await readCode(file, name, Math.min(CODE_MAX_CHARS, budget), kind === 'unknown');
+          if (!c) {
+            toast(`${name} isn't a picture, a PDF, or code or text, so it was left out.`, { ms: 5000 });
+            continue;
+          }
+          code.push(c);
+          labels.push(name);
+          budget -= c.chars;
+        }
+      } catch (err) {
+        toast(`${name}: ${err.message || "it couldn't be opened."}`, { kind: 'error' });
+        if (S.phase !== 'live') break; // the tutor has gone: no point carrying on
+      }
+    }
   } finally {
     share.busy = false;
-    $('#shareBtn').disabled = false;
+    setShareButtons(false);
     shareStatus('');
   }
+  if (!labels.length) return;
+  const parts = [];
+  if (shown.length) {
+    const which = images === 1 ? 'the last image you have been sent' : `the last ${images} images you have been sent, in this order`;
+    parts.push(`As images: ${which}: ${shown.join('; then ')}. They are files, not the student's screen.`);
+  }
+  if (code.length) {
+    parts.push(`As text, with line numbers added (the numbers and the | after them are not part of the file):\n\n${code.map((c) => c.block).join('\n\n')}`);
+    S.sharedCode = { t: Date.now(), text: code.map((c) => c.block).join('\n\n') };
+  }
+  const what = labels.length === 1 ? 'a file' : `${labels.length} files`;
+  tellTutor(labels.join(', '), `[The student has shared ${what}. ${parts.join('\n\n')}\nLook at ${labels.length === 1 ? 'it' : 'them'} closely.]`);
+}
+
+function setShareButtons(busy) {
+  for (const b of $$('#shareBtn, #pageShareBtn')) b.disabled = busy;
 }
 
 async function sharePicture(file, name) {
   const img = await imageToDataUrl(file, 1600, 0.85);
   shareStatus(`Sending ${name}…`);
-  if (!(await sendPicture(img.src.split(',')[1]))) throw new Error('The tutor disconnected while the picture was being sent.');
-  tellTutor(name, `[The student has shared a picture, ${name}. The newest image shows it, not their screen. Look at it closely.]`);
+  if (!(await sendPicture(img.src.split(',')[1]))) throw new Error('the tutor disconnected while the picture was being sent.');
 }
 
-async function sharePdf(file, name) {
+// Sends up to `room` pages; says what went, or null if nothing did.
+async function sharePdf(file, name, room) {
+  if (room < 1) {
+    toast(`${name} was left out: that's ${SHARE_MAX_PAGES} pages already. Share it on its own.`, { ms: 6000 });
+    return null;
+  }
   shareStatus(`Opening ${name}…`);
   const pdf = await openPdf(file);
   const total = pdf.numPages;
-  const count = Math.min(total, SHARE_MAX_PAGES);
+  const count = Math.min(total, room);
   let sent = 0;
   try {
     for (let n = 1; n <= count && !share.stop; n++) {
       shareStatus(`Sending ${name}: page ${n} of ${count}`, true);
       const picture = labelPage(await renderPdfPage(pdf, n, 1200), `${name}, page ${n} of ${total}`);
-      if (!(await sendPicture(picture))) throw new Error(sent ? `The tutor disconnected after page ${sent}.` : 'The tutor disconnected while the PDF was being sent.');
+      if (!(await sendPicture(picture))) throw new Error(sent ? `the tutor disconnected after page ${sent}.` : 'the tutor disconnected while the PDF was being sent.');
       sent = n;
     }
   } finally {
     pdf.destroy?.();
-    if (sent) {
-      const part = sent < total ? `the first ${sent} of its ${total} pages` : `all ${total} page${total === 1 ? '' : 's'}`;
-      tellTutor(
-        `${name} (${sent < total ? `pages 1–${sent} of ${total}` : `${total} page${total === 1 ? '' : 's'}`})`,
-        `[The student has shared a PDF, ${name}: ${part}, as the last ${sent} image${sent === 1 ? '' : 's'}, in order. Each page is labelled with its page number at the top. They are a file, not the student's screen. Look at them closely.]`,
-      );
+  }
+  if (total > count && !share.stop) toast(`${name} has ${total} pages, so the tutor was shown the first ${count}.`, { ms: 6000 });
+  if (!sent) return null;
+  const part = sent < total ? `the first ${sent} of its ${total} pages` : `all ${total} page${total === 1 ? '' : 's'}`;
+  return {
+    desc: `the PDF ${name}, ${part}, each labelled with its page number at the top`,
+    label: `${name} (${sent < total ? `pages 1–${sent} of ${total}` : `${total} page${total === 1 ? '' : 's'}`})`,
+    images: sent,
+  };
+}
+
+// A code or text file as a numbered block for the tutor, cut at `room` characters; null if it
+// isn't text after all (sniff: a file of an unknown kind).
+async function readCode(file, name, room, sniff) {
+  if (file.size > 3_000_000) throw new Error('it is too big to show the tutor (over 3 MB).');
+  let text = await file.text();
+  if (sniff && (/\u0000/.test(text.slice(0, 8000)) || (text.slice(0, 8000).match(/�/g) || []).length > 20)) return null;
+  const ext = fileExt(name);
+  let lang = CODE_LANGS[ext] || 'text';
+  if (ext === 'ipynb') {
+    try {
+      text = notebookText(text);
+    } catch {
+      lang = 'JSON';
     }
   }
-  if (total > SHARE_MAX_PAGES && !share.stop) toast(`That PDF has ${total} pages, so the tutor was shown the first ${SHARE_MAX_PAGES}.`, { ms: 6000 });
+  const lines = text.replace(/\r\n?/g, '\n').replace(/\n$/, '').split('\n');
+  const width = String(lines.length).length;
+  const kept = [];
+  let chars = 0;
+  for (let i = 0; i < lines.length; i++) {
+    const line = `${String(i + 1).padStart(width)} | ${lines[i]}`;
+    if (chars + line.length + 1 > room && kept.length) break;
+    kept.push(line);
+    chars += line.length + 1;
+  }
+  const cut = kept.length < lines.length;
+  const longest = (text.match(/`+/g) || []).reduce((most, run) => Math.max(most, run.length), 0);
+  const fence = '`'.repeat(Math.max(3, longest + 1)); // longer than any run of backticks in the file
+  const desc = `${name} (${lang}, ${lines.length} line${lines.length === 1 ? '' : 's'}${cut ? `; it's long, so only lines 1 to ${kept.length} are here: ask which part matters if it isn't there` : ''})`;
+  return { block: `${desc}:\n${fence}\n${kept.join('\n')}\n${fence}`, chars };
 }
+
+// A Jupyter notebook as a Python file: markdown cells as comments, outputs left out.
+function notebookText(json) {
+  const nb = JSON.parse(json);
+  const cells = Array.isArray(nb.cells) ? nb.cells : [];
+  const src = (c) => (Array.isArray(c.source) ? c.source.join('') : String(c.source || ''));
+  return cells
+    .map((c, i) => {
+      if (c.cell_type === 'markdown') return `# %% [markdown] cell ${i + 1}\n${src(c).split('\n').map((l) => `# ${l}`).join('\n')}`;
+      if (c.cell_type === 'code') return `# %% cell ${i + 1}\n${src(c)}`;
+      return '';
+    })
+    .filter(Boolean)
+    .join('\n\n');
+}
+
+shareInput.addEventListener('change', onShareFile);
+shareInput.addEventListener('cancel', reopenAfterPick);
+$('#shareBtn').addEventListener('click', pickFileToShare);
+$('#pageShareBtn').addEventListener('click', pickFileToShare);
+$('#shareStop').addEventListener('click', () => {
+  share.stop = true;
+  $('#shareStop').hidden = true;
+});
 
 // A strip above the page saying which page it is, so the tutor can say "on page 3".
 function labelPage(canvas, label) {
@@ -2516,6 +2663,9 @@ async function boot() {
     setupOverlay();
     // You started a lesson in the app, so the tutor starts straight away.
     startSession();
+  } else {
+    // Sending files (the paperclip under the board) shows its progress there.
+    $('#typeForm').before($('#shareStatus'));
   }
 }
 
