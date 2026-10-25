@@ -7,7 +7,7 @@ import { Board } from './board.js';
 import { AudioEngine } from './audio.js';
 import { LiveSession, isQuota } from './live.js';
 import { MODELS, VOICES, modelProfile, buildSystemPrompt, buildTools, buildThinkerPrompt, ASKS, SCREEN_ASKS, PC_ASKS } from './prompt.js';
-import { THINKING_MODELS, thinkDeeply, splitAnswer, modelLabel } from './deep.js';
+import { THINKING_MODELS, PRO_MODEL, thinkDeeply, splitAnswer, modelLabel } from './deep.js';
 import { pcBridge } from './pcbridge.js';
 import { diagramSVG } from './diagram.js';
 import { highlightCode } from './codehl.js';
@@ -785,11 +785,13 @@ function setupRelevant() {
   return { apiKey, model, customModel, thinkingLevel, voice, help, about, replySpeed, noisy, web, think: thinkers().length > 0 };
 }
 
-// The models think_deeply asks, in order: none when it's off.
+// The models think_deeply asks, in order: none when it's off, unless the Smart tutor needs it.
+// pro: Gemini Pro first, which only answers keys with billing turned on, then the Flash ones.
 function thinkers() {
   const t = settings.thinker;
-  if (t === 'off') return [];
+  if (t === 'off') return modelProfile(settings).alwaysThink ? THINKING_MODELS : [];
   if (t === 'custom') return settings.customThinker ? [settings.customThinker] : THINKING_MODELS;
+  if (t === 'pro') return [PRO_MODEL, ...THINKING_MODELS];
   if (t && t !== 'auto') return [t];
   return THINKING_MODELS;
 }
@@ -896,7 +898,7 @@ function buildSetup() {
   const setup = {
     model: `models/${profile.id}`,
     generationConfig,
-    systemInstruction: { parts: [{ text: buildSystemPrompt(settings, { screen: SCREEN, pc: PC, think: thinkers().length > 0 }) }] },
+    systemInstruction: { parts: [{ text: buildSystemPrompt(settings, { screen: SCREEN, pc: PC, think: thinkers().length > 0, alwaysThink: !!profile.alwaysThink }) }] },
     tools: buildTools(profile, { screen: SCREEN, pc: PC, web: settings.web, think: thinkers().length > 0 }),
     // Left to guess, the transcript of what you say sometimes comes out in another language.
     inputAudioTranscription: { languageCodes: ['en-GB'] },
@@ -2093,6 +2095,7 @@ function overlayToast(message, { kind, actionLabel }) {
 function onNative(type, arg) {
   if (type === 'stop') closeOverlay();
   else if (type === 'say') sayFromPc(arg);
+  else if (/^grip-[tb][lr]$/.test(type)) document.documentElement.dataset.grip = type.slice(5); // the corner that resizes the panel
   else if (type === 'blur') document.activeElement?.blur?.(); // you tapped another app, or Back, while typing
   else if (type === 'marks-cleared') showMarksButton(false); // you scrolled, switched app or turned the tablet
   else if (type === 'screen-started') {

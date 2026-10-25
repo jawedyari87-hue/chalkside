@@ -1,27 +1,40 @@
 // What the tutor is told, and the tools it can use.
 
+// The choices in Settings. live: the voice model it uses, when that isn't the choice's own name.
+// alwaysThink: every problem goes to the careful thinking model (think_deeply) first.
 export const MODELS = {
   'gemini-3.8-live': {
     label: 'Fast',
-    blurb: 'Replies quickly. Right for most lessons.',
+    blurb: 'Replies quickly, and hands only the hardest problems to careful thinking. Right for most lessons.',
     nonBlocking: true,
     scheduling: true,
     thinking: false,
   },
+  // Google's live models are all Flash-sized, and the one that thinks can't use the board (below),
+  // so Smart has the fast voice hand everything that needs working out to the careful thinking model.
+  smart: {
+    label: 'Smart',
+    blurb: 'Works every problem out carefully with a thinking model before explaining it, so it gets far more right. Each answer takes from about 20 seconds to 2 minutes.',
+    live: 'gemini-3.8-live',
+    nonBlocking: true,
+    scheduling: true,
+    thinking: false,
+    alwaysThink: true,
+  },
   // gemini-3.8-live-extended-thinking (Deep thinking) was here. Google's side fails every tool
   // call it makes ("a system error occurred"), so it can't write on the board; app.js moves
-  // anyone who picked it back to Fast. Put it back when Google fixes that.
+  // anyone who picked it back to Fast. Still the case on 2026-10-25. Put it back when Google fixes that.
 };
 
 export function modelProfile(settings) {
   if (settings.model === 'custom') {
     const id = String(settings.customModel || '').trim().replace(/^models\//, '') || 'gemini-3.8-live';
-    if (MODELS[id]) return { id, ...MODELS[id] };
+    if (MODELS[id]) return { ...MODELS[id], id: MODELS[id].live || id };
     const modern = /gemini-(3\.[89]|[4-9])/.test(id);
     return { id, label: 'Custom', nonBlocking: modern, scheduling: modern && !/thinking/.test(id), thinking: false };
   }
-  const id = MODELS[settings.model] ? settings.model : 'gemini-3.8-live';
-  return { id, ...MODELS[id] };
+  const key = MODELS[settings.model] ? settings.model : 'gemini-3.8-live';
+  return { ...MODELS[key], id: MODELS[key].live || key };
 }
 
 // Prebuilt Gemini voices and how Google describes them.
@@ -92,14 +105,22 @@ CODE AND COMPUTER SCIENCE
 `;
 
 // Handing hard problems to a slower model that thinks them through (think_deeply, js/deep.js).
-function thinkRules(s, mode) {
+// always: Smart mode, where everything that needs working out goes to it.
+function thinkRules(s, mode, always) {
+  const surface = mode === 'page' ? 'page' : 'screen';
+  const when = always
+    ? `- The student chose Smart mode: getting it right matters more than speed. Before you answer anything that needs working out (any maths, a proof, code, an algorithm, a question on their ${surface}, checking their working), call think_deeply, and a slower model that thinks carefully works it out from the newest picture of their ${surface} and writes the working on the board. Never work it out yourself first, even when it looks easy: your quick answers are often wrong.`
+    : `- You answer fast, so you can slip on anything subtle. When a problem needs careful reasoning (a proof, a derivation of several steps, a tricky integral, limit or probability, a recurrence or a complexity argument, whether an algorithm is correct, code that doesn't do what it should, an exam question with several parts), call think_deeply instead of working it out yourself. A slower model that thinks carefully works it out from the newest picture of their ${surface} and writes the working on the board.`;
+  const yourself = always
+    ? '- Answer yourself only for conversation, questions about what is already on the board, and definitions you are certain of.'
+    : '- For quick things (arithmetic, a definition, the next simple step), answer yourself.';
   return `
 THINKING IT THROUGH
-- You answer fast, so you can slip on anything subtle. When a problem needs careful reasoning (a proof, a derivation of several steps, a tricky integral, limit or probability, a recurrence or a complexity argument, whether an algorithm is correct, code that doesn't do what it should, an exam question with several parts), call think_deeply instead of working it out yourself. A slower model that thinks carefully works it out from the newest picture of their ${mode === 'page' ? 'page' : 'screen'} and writes the working on the board.
+${when}
 - Say one short sentence first, such as "Let me work that through properly", then call it. It takes from about twenty seconds to two minutes. Meanwhile keep the student going: ask what they have tried, or talk about the idea behind the question. Don't write your own solution to the same problem meanwhile.
 - When it finishes, its working is already on the board. Don't read it out or write it again: tell the student it's there, explain the key idea in a sentence or two (its notes_for_you help), and check they follow.
 - goal: solve shows the full working; check checks the student's own working or code and shows where it first goes wrong; hint puts only a hint on the board and gives you the full answer privately, to guide them without giving it away.${s.help === 'hints' ? ' The student wants hints, so use hint unless they ask for the full solution.' : ''}
-- For quick things (arithmetic, a definition, the next simple step), answer yourself.
+${yourself}
 `;
 }
 
@@ -130,7 +151,7 @@ Write what goes on the student's board:
 Last, on a line of its own, write TUTOR: and then notes that only the voice tutor sees: one or two plain sentences with the key idea for it to say out loud, without symbols.${about ? `\n\nAbout the student, in their own words: ${about}` : ''}`;
 }
 
-export function buildSystemPrompt(s, { screen = false, pc = false, think = false } = {}) {
+export function buildSystemPrompt(s, { screen = false, pc = false, think = false, alwaysThink = false } = {}) {
   const about = String(s.about || '').trim();
   const mode = pc ? 'pc' : screen ? 'screen' : 'page';
   return `You are Chalkside, a patient and expert private tutor for maths, programming and computer science. You are on a live voice call with a university student in the UK. ${SURFACES[mode]}
@@ -164,7 +185,7 @@ TEACHING
 - When they are confused by lecture notes or a model answer ${screen || pc ? 'on their screen' : 'they have added'}, explain the idea in plain words first, then show the steps on the board.
 - Be warm, encouraging and honest. Praise specific things they did well. Never be sarcastic.
 - Use British English and UK conventions: maths, brackets, nought, "dy by dx".
-${CODE_RULES}${think ? thinkRules(s, mode) : ''}${s.web === false ? '' : WEB_RULES}
+${CODE_RULES}${think ? thinkRules(s, mode, alwaysThink) : ''}${s.web === false ? '' : WEB_RULES}
 MESSAGES FROM THE APP
 - Text in [square brackets] comes from the app, not the student. Follow it quietly and never read it out.
 ${about ? `\nABOUT THE STUDENT (in their own words)\n${about}\n` : ''}`;

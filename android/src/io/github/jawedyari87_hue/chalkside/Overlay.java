@@ -41,6 +41,8 @@ import org.json.JSONObject;
 final class Overlay {
     private static final int BUBBLE = 0, PANEL = 1;
     private static final int PANEL_HANDLE_DP = 60; // the top of the panel (the page's bar) moves it
+    private static final int GRIP_DP = 48; // the panel's corner nearest the middle of the screen resizes it
+    private static final int MIN_PANEL_W_DP = 300, MIN_PANEL_H_DP = 260;
 
     private final TutorService service;
     private final Context ctx;
@@ -52,6 +54,8 @@ final class Overlay {
     private WebView web;
     private int mode = BUBBLE;
     private int bubbleW, bubbleH;
+    private int gripX = 1, gripY = 1; // which corner resizes the panel: 1 = right / bottom, -1 = left / top
+    private String gripSent = "";
     private boolean attached, focusable, keepOn;
     private volatile boolean captureWanted;
     private volatile boolean draggable = true;
@@ -219,6 +223,7 @@ final class Overlay {
         }
         web.destroy();
         focusable = false;
+        gripSent = "";
         lp.flags |= WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE;
         createWebView();
         wm.addView(root, lp);
@@ -264,11 +269,74 @@ final class Overlay {
             fx = 0f;
             fy = p.getFloat("panelY", by >= 0.5f ? 1f : 0f);
         }
+        if (mode == PANEL) {
+            // A size you've chosen by dragging the corner, kept for each way round of the tablet.
+            String turn = orientation(safe);
+            float fw = p.getFloat("panelW" + turn, -1f), fh = p.getFloat("panelH" + turn, -1f);
+            if (fw > 0f) {
+                w = Math.max(Math.round(fw * safe.width()), dp(MIN_PANEL_W_DP));
+                fx = p.getFloat("panelX", fx);
+            }
+            if (fh > 0f) {
+                h = Math.max(Math.round(fh * safe.height()), dp(MIN_PANEL_H_DP));
+                fy = p.getFloat("panelY", fy);
+            }
+        }
         lp.width = Math.min(w, safe.width());
         lp.height = Math.min(h, safe.height());
         lp.x = safe.left + Math.round(fx * Math.max(0, safe.width() - lp.width));
         lp.y = safe.top + Math.round(fy * Math.max(0, safe.height() - lp.height));
         update();
+        placeGrip();
+    }
+
+    private static String orientation(Rect safe) {
+        return safe.width() > safe.height() ? "L" : "P";
+    }
+
+    // The corner nearest the middle of the screen resizes the panel (the bottom one when it's level
+    // with the middle, since the top moves it). The page draws a grip there.
+    private void placeGrip() {
+        if (mode != PANEL) return;
+        Rect safe = safeArea();
+        gripX = lp.x + lp.width / 2 < safe.centerX() ? 1 : -1;
+        gripY = lp.y + lp.height / 2 <= safe.centerY() ? 1 : -1;
+        String g = "grip-" + (gripY > 0 ? "b" : "t") + (gripX > 0 ? "r" : "l");
+        if (!g.equals(gripSent)) {
+            gripSent = g;
+            send(g);
+        }
+    }
+
+    private boolean inGrip(float x, float y) {
+        int g = dp(GRIP_DP);
+        boolean across = gripX > 0 ? x > lp.width - g : x < g;
+        boolean down = gripY > 0 ? y > lp.height - g : y < g;
+        return across && down;
+    }
+
+    // Drag the grip: that corner follows your finger, the opposite one stays put, and the panel stays on screen.
+    private void resizeBy(int dx, int dy, int startX, int startY, int startW, int startH) {
+        Rect safe = safeArea();
+        int minW = Math.min(dp(MIN_PANEL_W_DP), safe.width()), minH = Math.min(dp(MIN_PANEL_H_DP), safe.height());
+        int right = startX + startW, bottom = startY + startH;
+        int maxW = gripX > 0 ? safe.right - startX : right - safe.left;
+        int maxH = gripY > 0 ? safe.bottom - startY : bottom - safe.top;
+        lp.width = clamp(startW + gripX * dx, minW, Math.max(minW, maxW));
+        lp.height = clamp(startH + gripY * dy, minH, Math.max(minH, maxH));
+        lp.x = gripX > 0 ? startX : right - lp.width;
+        lp.y = gripY > 0 ? startY : bottom - lp.height;
+        update();
+    }
+
+    private void saveSize() {
+        Rect safe = safeArea();
+        String turn = orientation(safe);
+        App.prefs(service).edit()
+                .putFloat("panelW" + turn, clamp01(lp.width / (float) Math.max(1, safe.width())))
+                .putFloat("panelH" + turn, clamp01(lp.height / (float) Math.max(1, safe.height())))
+                .apply();
+        savePosition();
     }
 
     private void moveTo(int x, int y) {
@@ -310,6 +378,7 @@ final class Overlay {
 
     private void setMode(String m, int cssW, int cssH) {
         mode = "panel".equals(m) ? PANEL : BUBBLE;
+        if (mode == PANEL) gripSent = ""; // tell the page where the grip is again
         if (mode == BUBBLE && cssW > 0 && cssH > 0) {
             float d = ctx.getResources().getDisplayMetrics().density; // a CSS pixel is a dp in the WebView
             bubbleW = Math.round(cssW * d);
@@ -360,12 +429,12 @@ final class Overlay {
         return Math.max(0f, Math.min(1f, v));
     }
 
-    /** Drags move the window; taps and scrolls go to the page. */
+    /** Drags move the window, or resize the panel from its grip; taps and scrolls go to the page. */
     private final class DragFrame extends FrameLayout {
         private final int slop;
         private float downX, downY;
-        private int startX, startY;
-        private boolean canDrag, dragging;
+        private int startX, startY, startW, startH;
+        private boolean canDrag, dragging, canResize, resizing;
 
         DragFrame(Context c) {
             super(c);
@@ -393,12 +462,16 @@ final class Overlay {
                     downY = e.getRawY();
                     startX = lp.x;
                     startY = lp.y;
-                    dragging = false;
-                    canDrag = draggable && (mode == BUBBLE || e.getY() < dp(PANEL_HANDLE_DP));
+                    startW = lp.width;
+                    startH = lp.height;
+                    dragging = resizing = false;
+                    canResize = draggable && mode == PANEL && inGrip(e.getX(), e.getY());
+                    canDrag = !canResize && draggable && (mode == BUBBLE || e.getY() < dp(PANEL_HANDLE_DP));
                     return false;
                 case MotionEvent.ACTION_MOVE:
-                    if (canDrag && !dragging && Math.hypot(e.getRawX() - downX, e.getRawY() - downY) > slop) {
-                        dragging = true;
+                    if ((canDrag || canResize) && !dragging && !resizing && Math.hypot(e.getRawX() - downX, e.getRawY() - downY) > slop) {
+                        if (canResize) resizing = true;
+                        else dragging = true;
                         return true;
                     }
                     return false;
@@ -409,11 +482,27 @@ final class Overlay {
 
         @Override
         public void requestDisallowInterceptTouchEvent(boolean disallow) {
-            if (!canDrag) super.requestDisallowInterceptTouchEvent(disallow);
+            if (!canDrag && !canResize) super.requestDisallowInterceptTouchEvent(disallow);
         }
 
         @Override
         public boolean onTouchEvent(MotionEvent e) {
+            if (resizing) {
+                switch (e.getActionMasked()) {
+                    case MotionEvent.ACTION_MOVE:
+                        resizeBy(Math.round(e.getRawX() - downX), Math.round(e.getRawY() - downY), startX, startY, startW, startH);
+                        break;
+                    case MotionEvent.ACTION_UP:
+                    case MotionEvent.ACTION_CANCEL:
+                        resizing = false;
+                        saveSize();
+                        placeGrip();
+                        break;
+                    default:
+                        break;
+                }
+                return true;
+            }
             if (!dragging) return super.onTouchEvent(e);
             switch (e.getActionMasked()) {
                 case MotionEvent.ACTION_MOVE:
@@ -423,6 +512,7 @@ final class Overlay {
                 case MotionEvent.ACTION_CANCEL:
                     dragging = false;
                     savePosition();
+                    placeGrip();
                     break;
                 default:
                     break;

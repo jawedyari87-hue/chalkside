@@ -36,8 +36,24 @@
   body.is-board .fields { margin: 0; }
   body.is-board .buttons { margin: 10px 0 4px; }
   body.is-board button { height: 40px; padding: 0 18px; font-size: 15px; }
-  #boardArea { flex: 1; display: flex; flex-direction: column; width: 100%; max-width: 1100px; min-height: 460px; margin: 0 auto; padding: 0 20px 20px; }
-  #boardFrame { flex: 1; width: 100%; border: 0; border-radius: 14px; background: #1c312b; }
+  #boardArea { flex: 1; display: flex; flex-direction: column; width: 100%; min-height: 460px; padding: 0 20px 20px; }
+  /* The board fills the window until you drag its edges; then it keeps the size you gave it. */
+  #boardBox { position: relative; flex: 1; width: 100%; max-width: 1100px; min-width: 300px; min-height: 260px; margin: 0 auto; }
+  #boardBox.is-sized { flex: none; max-width: none; margin: 0; }
+  #boardFrame { display: block; width: 100%; height: 100%; border: 0; border-radius: 14px; background: #1c312b; }
+  .grip { position: absolute; z-index: 2; touch-action: none; }
+  .grip--x { top: 14px; bottom: 14px; right: -9px; width: 14px; cursor: ew-resize; }
+  .grip--y { left: 14px; right: 14px; bottom: -9px; height: 14px; cursor: ns-resize; }
+  .grip--xy { right: -9px; bottom: -9px; width: 26px; height: 26px; cursor: nwse-resize; }
+  .grip--x::after, .grip--y::after { content: ""; position: absolute; border-radius: 3px; background: rgba(237, 241, 231, 0.35); }
+  .grip--x::after { top: 50%; left: 5px; width: 4px; height: 44px; margin-top: -22px; }
+  .grip--y::after { left: 50%; top: 5px; width: 44px; height: 4px; margin-left: -22px; }
+  .grip--xy::after { content: ""; position: absolute; right: 6px; bottom: 6px; width: 12px; height: 12px; border-right: 3px solid rgba(237, 241, 231, 0.55); border-bottom: 3px solid rgba(237, 241, 231, 0.55); border-radius: 0 0 4px 0; }
+  .grip:hover::after { background-color: rgba(237, 241, 231, 0.7); }
+  .grip--xy:hover::after { background: none; border-color: rgba(237, 241, 231, 0.9); }
+  .sizeHelp { margin: 10px auto 0; max-width: 1100px; width: 100%; font-size: 14px; }
+  #boardBox.is-sized + .sizeHelp { margin-left: 0; }
+  .sizeHelp button { height: auto; padding: 0; border: 0; background: none; color: var(--accent); font: inherit; font-weight: 600; text-decoration: underline; cursor: pointer; }
   #boardAway { margin: 8px 0; padding: 16px 18px; border-radius: 14px; background: rgba(0, 0, 0, 0.25); }
   [hidden] { display: none !important; }
   @media (max-width: 560px) { .fields, body.is-board .fields { grid-template-columns: 1fr; } }
@@ -73,7 +89,13 @@
 </main>
 
 <section id="boardArea" hidden aria-label="The tutor's board">
-  <iframe id="boardFrame" title="The tutor's board"></iframe>
+  <div id="boardBox">
+    <iframe id="boardFrame" title="The tutor's board"></iframe>
+    <div class="grip grip--x" data-grip="x" title="Drag to make the board wider or narrower"></div>
+    <div class="grip grip--y" data-grip="y" title="Drag to make the board taller or shorter"></div>
+    <div class="grip grip--xy" data-grip="xy" title="Drag to resize the board"></div>
+  </div>
+  <p class="dim sizeHelp" id="sizeHelp">Drag the board's right edge, bottom edge or corner to resize it. <button type="button" id="fitBoard" hidden>Fit it to the window again</button></p>
   <div id="boardAway" hidden>
     <p>The board is in its own window, on top of your other windows. Move it with its title bar, and drag its edges to resize it.</p>
     <div class="buttons"><button type="button" class="ghost" id="dock">Bring it back here</button></div>
@@ -538,28 +560,103 @@
   function mountInPage() {
     view = null;
     away.hidden = true;
-    frame.hidden = false;
+    boardBox.hidden = sizeHelp.hidden = false;
     frame.onload = () => (view = makeView(frame.contentDocument, false));
     frame.srcdoc = '<!doctype html><html lang="en-GB"><head><meta charset="utf-8"></head><body></body></html>';
   }
 
   async function floatBoard() {
     if (pip || !('documentPictureInPicture' in window)) return;
+    const size = saved('chalkside-pc:pipSize');
     try {
-      pip = await documentPictureInPicture.requestWindow({ width: 520, height: 760 });
+      pip = await documentPictureInPicture.requestWindow({ width: size?.w || 520, height: size?.h || 760 });
     } catch {
       pip = null;
       return;
     }
     view = makeView(pip.document, true);
-    frame.hidden = true;
+    boardBox.hidden = sizeHelp.hidden = true;
     frame.onload = null;
     frame.srcdoc = '';
     away.hidden = false;
+    // The window's own edges resize it; next time it opens at the size you left it.
+    pip.addEventListener('resize', () => store('chalkside-pc:pipSize', JSON.stringify({ w: pip.innerWidth, h: pip.innerHeight })));
     pip.addEventListener('pagehide', () => {
       pip = null;
       mountInPage();
     });
+  }
+
+  // ---- the board's size on this page: drag its right edge, bottom edge or corner ----------------
+
+  const boardBox = $('#boardBox'), sizeHelp = $('#sizeHelp'), fitBoard = $('#fitBoard');
+  const MIN_W = 300, MIN_H = 260;
+
+  function saved(key) {
+    try {
+      return JSON.parse(store(key) || 'null');
+    } catch {
+      return null;
+    }
+  }
+
+  // A size you chose, kept within the window's width.
+  function sizeBoard(w, h) {
+    const maxW = Math.max(MIN_W, boardArea.clientWidth - 40);
+    const size = { w: Math.round(Math.min(maxW, Math.max(MIN_W, w))), h: Math.round(Math.max(MIN_H, h)) };
+    boardBox.classList.add('is-sized');
+    boardBox.style.width = `${size.w}px`;
+    boardBox.style.height = `${size.h}px`;
+    fitBoard.hidden = false;
+    return size;
+  }
+
+  function fitToWindow() {
+    boardBox.classList.remove('is-sized');
+    boardBox.style.width = boardBox.style.height = '';
+    fitBoard.hidden = true;
+    store('chalkside-pc:boardSize', '');
+  }
+
+  for (const grip of document.querySelectorAll('[data-grip]')) {
+    grip.addEventListener('pointerdown', (e) => {
+      if (e.button !== 0) return;
+      e.preventDefault();
+      try {
+        grip.setPointerCapture(e.pointerId); // keeps the drag going when the pointer leaves the grip
+      } catch {
+        // the pointer has already gone
+      }
+      const r = boardBox.getBoundingClientRect();
+      const from = { x: e.clientX, y: e.clientY, w: r.width, h: r.height };
+      const axes = grip.dataset.grip;
+      let size = { w: r.width, h: r.height };
+      frame.style.pointerEvents = 'none'; // so the board's own frame doesn't take the drag
+      const drag = new AbortController();
+      grip.addEventListener(
+        'pointermove',
+        (ev) => (size = sizeBoard(axes.includes('x') ? from.w + ev.clientX - from.x : from.w, axes.includes('y') ? from.h + ev.clientY - from.y : from.h)),
+        { signal: drag.signal },
+      );
+      const end = () => {
+        drag.abort();
+        frame.style.pointerEvents = '';
+        store('chalkside-pc:boardSize', JSON.stringify(size));
+      };
+      grip.addEventListener('pointerup', end, { signal: drag.signal });
+      grip.addEventListener('pointercancel', end, { signal: drag.signal });
+    });
+    grip.addEventListener('dblclick', fitToWindow);
+  }
+  fitBoard.addEventListener('click', fitToWindow);
+  // A narrower window: keep the board inside it.
+  addEventListener('resize', () => {
+    if (boardBox.classList.contains('is-sized')) sizeBoard(boardBox.offsetWidth, boardBox.offsetHeight);
+  });
+
+  function restoreBoardSize() {
+    const s = saved('chalkside-pc:boardSize');
+    if (s?.w && s?.h) sizeBoard(s.w, s.h);
   }
 
   function dockBoard() {
@@ -576,6 +673,7 @@
     document.body.classList.add('is-board');
     boardArea.hidden = false;
     boardOnly.hidden = true;
+    restoreBoardSize();
     if (!view && !pip) mountInPage();
     poller ||= startTicker(pollBoard, 400);
   }

@@ -13,8 +13,10 @@ const API = 'https://generativelanguage.googleapis.com/v1beta/models';
 // Newest first. All of them read code and maths off a screenshot well (tested October 2026);
 // what differs is how busy Google is: on a free key, any of them can be turned away or queued.
 export const THINKING_MODELS = ['gemini-3.8-flash', 'gemini-3.7-flash', 'gemini-3.6-flash', 'gemini-3.5-flash'];
+// Cleverer still, but Google's free tier doesn't include Pro: only keys with billing turned on get answers.
+export const PRO_MODEL = 'gemini-pro-latest';
 
-const HEDGE_MS = 30000; // nothing back from a model by then: it's probably queued, so ask the next one too
+const HEDGE_MS = 20000; // nothing back from a model by then: it's probably queued, so ask the next one too
 const LIMIT_MS = 150000;
 
 export class ThinkError extends Error {
@@ -39,6 +41,9 @@ function failure(model, status, body) {
   const reason = `${e.message || `HTTP ${status}`}${ids.length ? ` [${ids.join(', ')}]` : ''}`;
   const name = modelLabel(model);
   if (status === 503 || status === 500 || status === 504 || e.status === 'UNAVAILABLE') return new ThinkError(`${name} is too busy`, { retry: true, busy: true, reason });
+  if ((status === 429 || e.status === 'RESOURCE_EXHAUSTED') && /pro/i.test(model) && /FreeTier/i.test(reason)) {
+    return new ThinkError(`${name} needs billing turned on for this key in Google AI Studio`, { retry: true, quota: true, reason });
+  }
   if (status === 429 || e.status === 'RESOURCE_EXHAUSTED') return new ThinkError(`this key has used up its allowance for ${name} for now`, { retry: true, quota: true, reason });
   if (status === 404) return new ThinkError(`${name} isn't available to this key`, { retry: true, reason });
   if (/API key not valid|API_KEY_INVALID|API key expired/i.test(reason)) return new ThinkError('Google rejected the API key', { reason });

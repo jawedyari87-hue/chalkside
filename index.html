@@ -265,6 +265,7 @@
         <label class="field"><span>Model</span>
           <select id="sModel">
             <option value="gemini-3.8-live">Fast (gemini-3.8-live)</option>
+            <option value="smart">Smart: thinks every problem through (slower)</option>
             <option value="custom">Another model ID…</option>
           </select>
         </label>
@@ -276,6 +277,7 @@
         <label class="field"><span>Careful thinking</span>
           <select id="sThinker">
             <option value="auto">Newest Flash model that's free (best)</option>
+            <option value="pro">Gemini Pro first, then Flash (Pro needs billing on your key)</option>
             <option value="custom">Another model ID…</option>
             <option value="off">Off</option>
           </select>
@@ -364,6 +366,7 @@
 <input type="file" id="imageInput" accept="image/*" hidden>
 <input type="file" id="pdfInput" accept="application/pdf,.pdf" hidden>
 <input type="file" id="shareInput" accept="image/*,application/pdf,.pdf" hidden>
+<div class="ov-grip" id="ovGrip" aria-hidden="true"></div>
 <div class="toasts" id="toasts" aria-live="polite"></div>
 <div class="print-sheet" id="printSheet"></div>
 </body>

@@ -716,6 +716,19 @@ html.is-pc, html.is-pc body { background: var(--slate); }
 /* The settings that are about the handwriting page don't apply; the microphone check does. */
 .is-pc [data-page-only]:not(#sMicGroup) { display: none !important; }
 
+/* The Android app resizes its panel from the corner nearest the middle of the screen (the app
+   does the dragging, and says which corner): this marks it. */
+.ov-grip { display: none; position: fixed; z-index: 40; width: 14px; height: 14px; pointer-events: none; border: 0 solid rgba(237, 241, 231, 0.6); }
+html.is-overlay:not(.is-pc)[data-ov="panel"][data-grip] .ov-grip { display: block; }
+[data-grip^="b"] .ov-grip { bottom: 3px; border-bottom-width: 3px; }
+[data-grip^="t"] .ov-grip { top: 3px; border-top-width: 3px; }
+[data-grip$="r"] .ov-grip { right: 3px; border-right-width: 3px; }
+[data-grip$="l"] .ov-grip { left: 3px; border-left-width: 3px; }
+[data-grip="br"] .ov-grip { border-bottom-right-radius: 6px; }
+[data-grip="bl"] .ov-grip { border-bottom-left-radius: 6px; }
+[data-grip="tr"] .ov-grip { border-top-right-radius: 6px; }
+[data-grip="tl"] .ov-grip { border-top-left-radius: 6px; }
+
 /* ---- the Android app's settings screen (?overlay&settings): just the settings, full screen ---- */
 .is-app-settings .app { display: none; }
 .is-app-settings [data-page-only] { display: none !important; }
