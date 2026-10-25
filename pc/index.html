@@ -49,20 +49,29 @@
 
     <section class="step" id="step1">
       <h2>1. Share a screen or window</h2>
-      <p class="dim">A single window, such as your code editor or the slides, works best: the tutor then never sees its own notes.</p>
+      <p class="dim">A single window, such as your code editor or the slides, works best: the tutor then never sees its own notes. You can share a second one as well, such as your slides and your code, or both of your monitors.</p>
       <p class="status" id="shareState" role="status"></p>
       <div class="buttons">
         <button type="button" id="share">Share a screen or window</button>
         <button type="button" class="ghost" id="unshare" hidden>Stop sharing</button>
       </div>
+      <div id="second" hidden>
+        <p class="status" id="share2State" role="status"></p>
+        <div class="buttons">
+          <button type="button" class="ghost" id="share2">Share a second screen or window</button>
+          <button type="button" class="ghost" id="unshare2" hidden>Stop the second</button>
+        </div>
+      </div>
     </section>
 
     <section class="step is-off" id="step2">
       <h2>2. Open the tutor</h2>
-      <p class="dim" id="openHelp">It opens in a small window that stays on top of your other apps. Press <strong>Start tutor</strong> there, and allow the microphone when asked.</p>
+      <p class="dim" id="openHelp"><strong>Open the tutor</strong> puts it in a small window that stays on top of your other apps (drag its edges to resize it; browsers don't let it grow beyond a certain size). <strong>Open it in a big window</strong> gives it an ordinary window instead, which you can maximise or make full screen, on a second monitor say, but which doesn't stay on top. Press <strong>Start tutor</strong> there, and allow the microphone when asked.</p>
       <p class="status" id="tutorState" role="status"></p>
       <div class="buttons">
         <button type="button" id="open" disabled>Open the tutor</button>
+        <button type="button" class="ghost" id="openBig" disabled>Open it in a big window</button>
+        <button type="button" class="ghost" id="move" hidden></button>
         <button type="button" class="ghost" id="close" hidden>Close the tutor</button>
       </div>
     </section>
@@ -71,7 +80,7 @@
       <h2>Good to know</h2>
       <ul class="dim">
         <li>Keep this page open while you study. You can minimise it; closing it closes the tutor.</li>
-        <li>The tutor gets a new picture only when your screen changes. The eye button in its window hides your screen from it.</li>
+        <li>The tutor gets a new picture only when your screen changes. The eye button in its window hides your screen from it. With two shared, each picture says <em>Screen 1</em> or <em>Screen 2</em> across the top, so the tutor can tell them apart.</li>
         <li>It needs your free Gemini key: the first time, the tutor window asks for it. Its settings are in the sliders button.</li>
         <li>To open Chalkside PC like an app, click <strong>Install</strong> in Chrome's or Edge's address bar.</li>
       </ul>
@@ -87,8 +96,13 @@ const $ = (s) => document.querySelector(s);
 const params = new URLSearchParams(location.search);
 const TUTOR = new URL(`../?overlay&pc${params.has('mock') ? '&mock' : ''}`, location.href).href;
 const screen = new PcScreen();
+const screen2 = new PcScreen(); // a second screen or window, if you share one
 let pip = null; // the window that stays on top, where browsers have them
+let big = null; // or an ordinary window, as big as you like
+let bigGone = null; // tidies up after it
 let frame = null; // the tutor
+let where = ''; // where it is: 'top', 'big' or 'beside' (these steps)
+let moving = false; // to another window: the screens stay shared
 let panelSize = [520, 740];
 
 const touchOnly = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
@@ -98,27 +112,46 @@ if (touchOnly || !navigator.mediaDevices?.getDisplayMedia) {
 }
 if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('../sw.js', { scope: '../' }).catch(() => {});
 
+const WHERE = {
+  top: 'The tutor is open in a small window that stays on top of your other apps. Drag its edges to resize it.',
+  big: 'The tutor is open in a big window: maximise it, or press the full-screen button in its bar. It doesn’t stay on top of other apps.',
+  beside: 'The tutor is beside these steps. Your browser can’t keep it on top of other apps, so put this window beside your work.',
+};
+
 function render() {
-  const sharing = screen.sharing;
+  const sharing = screen.sharing, sharing2 = screen2.sharing;
   $('#shareState').textContent = sharing ? `Sharing: ${screen.label}.` : '';
   $('#share').textContent = sharing ? 'Share something else' : 'Share a screen or window';
   $('#unshare').hidden = !sharing;
-  $('#step2').classList.toggle('is-off', !sharing && !frame);
-  $('#open').disabled = !sharing || !!frame;
-  $('#open').hidden = !!frame;
+  $('#second').hidden = !sharing && !sharing2;
+  $('#share2State').textContent = sharing2 ? `Also sharing: ${screen2.label}.` : '';
+  $('#share2').textContent = sharing2 ? 'Share a different second one' : 'Share a second screen or window';
+  $('#unshare2').hidden = !sharing2;
+  // With two, every picture says which screen it is.
+  screen.setStrip(sharing && sharing2 ? `Screen 1 · ${screen.label}` : '');
+  screen2.setStrip(sharing2 ? `Screen 2 · ${screen2.label}` : '');
+  const any = sharing || sharing2;
+  $('#step2').classList.toggle('is-off', !any && !frame);
+  $('#open').disabled = $('#openBig').disabled = !any || !!frame;
+  $('#open').hidden = $('#openBig').hidden = !!frame;
+  $('#move').hidden = !frame || where === 'beside';
+  $('#move').textContent = where === 'big' ? 'Move it to a window on top' : 'Move it to a big window';
   $('#close').hidden = !frame;
-  $('#tutorState').textContent = !frame ? '' : pip ? 'The tutor is open in its own window, on top of your other apps.' : 'The tutor is beside these steps. Your browser can’t keep it on top of other apps, so put this window beside your work.';
+  $('#tutorState').textContent = frame ? WHERE[where] : '';
 }
 
 // What the tutor page reaches for as window.parent.chalksidePc (see js/pcbridge.js).
-function hostFor(win) {
+function hostFor(win, kind) {
   return {
     screen,
+    screen2,
+    kind, // 'top', 'big' or 'beside'
     floating: win !== window, // in its own window, rather than beside these steps
     close: () => closeTutor(),
     // The tutor's small bar or its panel with the notes: fit the window that stays on top.
+    // A big window keeps the size you give it.
     resize(mode, w, h) {
-      if (win === window) return;
+      if (win === window || kind === 'big') return;
       try {
         const dw = win.outerWidth - win.innerWidth;
         const dh = win.outerHeight - win.innerHeight;
@@ -135,25 +168,37 @@ function hostFor(win) {
   };
 }
 
-function makeFrame(doc) {
+// fullscreen: only a big window can let the tutor fill the screen.
+function makeFrame(doc, { fullscreen = false } = {}) {
   const f = doc.createElement('iframe');
   f.src = TUTOR;
   f.title = 'Chalkside tutor';
-  f.allow = 'microphone; display-capture; autoplay; screen-wake-lock; clipboard-write';
+  f.allow = `microphone; display-capture; autoplay; screen-wake-lock; clipboard-write${fullscreen ? '; fullscreen' : ''}`;
   Object.assign(f.style, { border: '0', width: '100%', height: '100%', display: 'block' });
   return f;
 }
 
-async function share() {
-  $('#shareState').classList.remove('bad');
+// A window of ours (on top, or big) made ready for the tutor.
+function dress(win) {
+  const d = win.document;
+  d.title = 'Chalkside tutor';
+  d.documentElement.style.height = '100%';
+  Object.assign(d.body.style, { margin: '0', height: '100%', background: '#213a33', overflow: 'hidden' });
+  return d;
+}
+
+async function share(which = screen) {
+  const state = which === screen ? $('#shareState') : $('#share2State');
+  state.classList.remove('bad');
   try {
-    await screen.start();
+    await which.start();
   } catch (err) {
-    $('#shareState').textContent = err?.name === 'NotAllowedError' ? 'Sharing was cancelled.' : `Couldn't share: ${err?.message || err}`;
-    $('#shareState').classList.add('bad');
+    state.textContent = err?.name === 'NotAllowedError' ? 'Sharing was cancelled.' : `Couldn't share: ${err?.message || err}`;
+    state.classList.add('bad');
     return;
   }
   render();
+  if (which === screen2) return;
   // Ask for the microphone here too, where the browser shows the question clearly.
   try {
     const s = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -168,13 +213,11 @@ async function openTutor() {
   if ('documentPictureInPicture' in window) {
     try {
       pip = await documentPictureInPicture.requestWindow({ width: panelSize[0], height: panelSize[1] });
-      const d = pip.document;
-      d.title = 'Chalkside tutor';
-      d.documentElement.style.height = '100%';
-      Object.assign(d.body.style, { margin: '0', height: '100%', background: '#213a33', overflow: 'hidden' });
-      pip.chalksidePc = hostFor(pip);
+      const d = dress(pip);
+      pip.chalksidePc = hostFor(pip, 'top');
       frame = makeFrame(d);
       d.body.append(frame);
+      where = 'top';
       pip.addEventListener('pagehide', () => {
         pip = null;
         frame = null;
@@ -187,16 +230,56 @@ async function openTutor() {
       pip = null;
     }
   }
-  // No window that stays on top: the tutor goes beside these steps.
-  window.chalksidePc = hostFor(window);
+  openBeside();
+}
+
+// An ordinary window, filling the screen to start with: maximise it, move it to another monitor,
+// or let the tutor go full screen. Browsers cap the size of a window that stays on top.
+function openBig() {
+  if (frame) return;
+  const s = window.screen;
+  const win = window.open('', 'chalkside-tutor', `popup,left=${s.availLeft ?? 0},top=${s.availTop ?? 0},width=${s.availWidth},height=${s.availHeight}`);
+  if (!win) {
+    openBeside();
+    $('#tutorState').textContent = 'Your browser blocked the big window, so the tutor is beside these steps. To use the big window, allow pop-ups for this site (the icon at the right of the address bar), close the tutor and open it again.';
+    return;
+  }
+  big = win;
+  const d = dress(win);
+  win.chalksidePc = hostFor(win, 'big');
+  frame = makeFrame(d, { fullscreen: true });
+  d.body.replaceChildren(frame);
+  where = 'big';
+  const gone = () => {
+    if (big !== win) return;
+    clearInterval(watch);
+    big = null;
+    frame = null;
+    tutorClosed();
+  };
+  const watch = setInterval(() => win.closed && gone(), 800);
+  win.addEventListener('pagehide', gone);
+  bigGone = gone;
+  win.focus();
+  render();
+}
+
+// No window that stays on top: the tutor goes beside these steps.
+function openBeside() {
+  window.chalksidePc = hostFor(window, 'beside');
   frame = makeFrame(document);
   $('#here').append(frame);
   $('#main').classList.add('is-beside');
+  where = 'beside';
   render();
 }
 
 function closeTutor() {
   if (pip) return pip.close(); // its pagehide does the rest
+  if (big) {
+    big.close();
+    return bigGone?.();
+  }
   frame?.remove();
   frame = null;
   tutorClosed();
@@ -204,22 +287,52 @@ function closeTutor() {
 
 function tutorClosed() {
   $('#main').classList.remove('is-beside');
-  screen.stop();
+  if (!moving) {
+    screen.stop();
+    screen2.stop();
+  }
   render();
 }
 
-screen.addEventListener('ended', () => {
-  render();
-  $('#shareState').textContent = 'Sharing has stopped, so the tutor can’t see your screen. Share it again here.';
-  $('#shareState').classList.add('bad');
-});
-$('#share').addEventListener('click', share);
-$('#unshare').addEventListener('click', () => {
-  screen.stop();
-  screen.dispatchEvent(new Event('ended'));
-});
+// From the window on top to a big one, or back. The tutor starts again there (press Start tutor);
+// the lesson carries on, and the screens stay shared.
+async function moveTutor() {
+  const to = where === 'big' ? 'top' : 'big';
+  moving = true;
+  closeTutor();
+  for (let i = 0; i < 20 && frame; i++) await new Promise((r) => setTimeout(r, 50));
+  moving = false;
+  if (to === 'big') openBig();
+  else await openTutor();
+}
+
+for (const [which, state, again] of [
+  [screen, '#shareState', 'Share it again here.'],
+  [screen2, '#share2State', 'Share it again here if you want both.'],
+]) {
+  which.addEventListener('ended', () => {
+    render();
+    const still = which === screen ? screen2.sharing : screen.sharing;
+    $(state).textContent = still ? `That one has stopped; the tutor still sees the other. ${again}` : 'Sharing has stopped, so the tutor can’t see your screen. Share it again here.';
+    $(state).classList.add('bad');
+  });
+}
+$('#share').addEventListener('click', () => share(screen));
+$('#share2').addEventListener('click', () => share(screen2));
+for (const [which, button] of [
+  [screen, '#unshare'],
+  [screen2, '#unshare2'],
+]) {
+  $(button).addEventListener('click', () => {
+    which.stop();
+    which.dispatchEvent(new Event('ended'));
+  });
+}
 $('#open').addEventListener('click', openTutor);
+$('#openBig').addEventListener('click', openBig);
+$('#move').addEventListener('click', moveTutor);
 $('#close').addEventListener('click', closeTutor);
+addEventListener('pagehide', () => big?.close()); // the tutor needs this page
 render();
 </script>
 </body>

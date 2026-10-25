@@ -670,6 +670,8 @@ html.is-overlay, html.is-overlay body { background: transparent; }
 #ovEye[aria-pressed="false"] { color: var(--chalk-pink); }
 #ovEye[aria-pressed="false"] .ov-eye-on, #ovExpand[aria-expanded="true"] .ov-expand { display: none; }
 #ovEye[aria-pressed="false"] .ov-eye-off, #ovExpand[aria-expanded="true"] .ov-collapse { display: block; }
+.ov-full-off, #ovFull[aria-pressed="true"] .ov-full-on { display: none; }
+#ovFull[aria-pressed="true"] .ov-full-off { display: block; }
 .ov-badge {
   position: absolute; top: 0; right: -2px; min-width: 19px; height: 19px; padding: 0 5px; border-radius: 10px;
   background: var(--chalk-yellow); color: #2b2a1e; font-size: 12px; font-weight: 700; line-height: 19px; text-align: center;

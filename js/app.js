@@ -1218,7 +1218,8 @@ function startTimer() {
   stopTimer();
   const tick = () => {
     const label = S.profile ? S.profile.label : '';
-    const pc = SCREEN && typeof droid?.pcLinked === 'function' && droid.pcLinked() ? ' · PC' : ''; // your PC is linked
+    let pc = SCREEN && typeof droid?.pcLinked === 'function' && droid.pcLinked() ? ' · PC' : ''; // your PC is linked
+    if (PC) pc = droid.screens?.() > 1 ? ' · 2 screens' : ''; // or, on a computer, two screens shared
     statusMeta.textContent = `${fmtClock((Date.now() - S.startedAt) / 1000)}${label ? ' · ' + label : ''}${pc}`;
     checkMic();
   };
@@ -1625,10 +1626,11 @@ function thinkerBrief(question, goal, pic) {
     .map((e) => `${e.who === 'you' ? 'Student' : 'Tutor'}: ${cleanSpeech(e.text).trim().slice(0, 400)}`)
     .filter((line) => !/:\s*$/.test(line));
   const onBoard = board.summary(10).filter((line) => !/still being thought through/.test(line));
+  const two = PC && typeof droid?.pcLinked === 'function' && droid.pcLinked();
   const shows = {
     page: "the student's handwritten page",
-    screen: PC ? "the student's computer screen" : "the student's tablet screen",
-    pc: "the student's computer screen",
+    screen: PC ? `the student's ${two ? 'first screen (Screen 1)' : 'computer screen'}` : "the student's tablet screen",
+    pc: PC ? "the student's second screen (Screen 2)" : "the student's computer screen",
     file: 'a file the student shared (a PDF page or a photo)',
   };
   return [
@@ -2491,6 +2493,16 @@ async function boot() {
     // On a tablet the settings are on the app's start screen; on a computer they're in the bar.
     $('#ovSettings').hidden = false;
     $('#ovSettings').addEventListener('click', () => openSettings());
+    // In a big window (or beside the steps) the tutor can fill the whole screen; the window that
+    // stays on top can't.
+    const full = $('#ovFull');
+    full.hidden = !document.fullscreenEnabled || droid.onTop;
+    full.addEventListener('click', () => (document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen()).catch(() => {}));
+    document.addEventListener('fullscreenchange', () => {
+      const on = !!document.fullscreenElement;
+      full.setAttribute('aria-pressed', String(on));
+      full.setAttribute('aria-label', on ? 'Leave full screen' : 'Full screen');
+    });
     // The window is the tutor's board, with what it says as captions underneath: writing and
     // speech in two places. The quick asks, paperclip and typing box go under the board too,
     // and Expand still opens everything in one feed.

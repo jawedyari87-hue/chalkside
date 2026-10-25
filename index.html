@@ -51,6 +51,8 @@
   <symbol id="i-right" viewBox="0 0 24 24"><path d="M9 5l7 7-7 7"/></symbol>
   <symbol id="i-expand" viewBox="0 0 24 24"><path d="M14 4h6v6M10 20H4v-6M20 4l-7 7M4 20l7-7"/></symbol>
   <symbol id="i-collapse" viewBox="0 0 24 24"><path d="M4 14h6v6M20 10h-6V4M14 10l7-7M3 21l7-7"/></symbol>
+  <symbol id="i-full" viewBox="0 0 24 24"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></symbol>
+  <symbol id="i-full-exit" viewBox="0 0 24 24"><path d="M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5"/></symbol>
 </svg>
 
 <div class="app" id="app" data-layout="board-left">
@@ -65,6 +67,9 @@
       <button type="button" class="ov-btn" id="ovMarks" aria-label="Remove the tutor's marks from your screen" hidden><svg class="ic"><use href="#i-unmark"/></svg></button>
       <button type="button" class="ov-btn" id="ovVolume" aria-label="The tutor's volume" hidden><svg class="ic"><use href="#i-volume"/></svg></button>
       <button type="button" class="ov-btn" id="ovSettings" aria-label="Settings" hidden><svg class="ic"><use href="#i-sliders"/></svg></button>
+      <button type="button" class="ov-btn" id="ovFull" aria-pressed="false" aria-label="Full screen" hidden>
+        <svg class="ic ov-full-on"><use href="#i-full"/></svg><svg class="ic ov-full-off"><use href="#i-full-exit"/></svg>
+      </button>
       <button type="button" class="ov-btn" id="ovEye" aria-pressed="true" aria-label="Hide your screen from the tutor">
         <svg class="ic ov-eye-on"><use href="#i-eye"/></svg><svg class="ic ov-eye-off"><use href="#i-eye-off"/></svg>
       </button>

@@ -4,6 +4,7 @@
 
 const MAX_SIDE = 1600; // sharp enough for code and slide text
 const CHANGED = 20; // summed difference over the grid; the mouse pointer alone comes to about 13
+const STRIP = 34; // height of the label across the top, when two screens are shared
 
 // A 32 x 20 grid of average brightness. Each cell averages 20 x 20 pixels of a 640 x 400 copy:
 // shrinking straight to 32 x 20 would look at a few pixels per cell and miss small changes.
@@ -17,6 +18,7 @@ export class PcScreen extends EventTarget {
     this.seq = 0;
     this.json = '';
     this.label = '';
+    this.strip = ''; // e.g. "Screen 2 · the window “Lecture 7”", drawn across the top of each picture
     this.small = document.createElement('canvas');
     this.small.width = GRID_W * CELL;
     this.small.height = GRID_H * CELL;
@@ -60,6 +62,13 @@ export class PcScreen extends EventTarget {
     this.reader = null;
     this.stream?.getTracks().forEach((t) => t.stop());
     this.stream = null;
+  }
+
+  // With two screens shared, each picture says which it is. A new label means a new picture.
+  setStrip(text) {
+    if (text === this.strip) return;
+    this.strip = text;
+    this.sent = null;
   }
 
   // The newest picture as JSON {seq, w, h, data} if it is newer than `since` (-1: the newest, whatever it is).
@@ -136,11 +145,20 @@ export class PcScreen extends EventTarget {
     if (this.sent && differs(this.sent, sig) < CHANGED) return; // nothing new
     const scale = Math.min(1, MAX_SIDE / Math.max(shot.w, shot.h));
     const c = this.big;
+    const top = this.strip ? STRIP : 0;
     c.width = Math.round(shot.w * scale);
-    c.height = Math.round(shot.h * scale);
+    c.height = Math.round(shot.h * scale) + top;
     const g = c.getContext('2d');
     g.imageSmoothingQuality = 'high';
-    g.drawImage(shot.img, 0, 0, c.width, c.height);
+    g.drawImage(shot.img, 0, top, c.width, c.height - top);
+    if (top) {
+      g.fillStyle = '#213a33';
+      g.fillRect(0, 0, c.width, top);
+      g.fillStyle = '#ffffff';
+      g.font = `bold ${Math.round(top * 0.58)}px sans-serif`;
+      g.textBaseline = 'middle';
+      g.fillText(this.strip, 14, top / 2, c.width - 28);
+    }
     const data = c.toDataURL('image/jpeg', 0.8).split(',')[1];
     this.sent = sig;
     this.seq++;

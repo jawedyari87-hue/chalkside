@@ -38,8 +38,9 @@
   body.is-board button { height: 40px; padding: 0 18px; font-size: 15px; }
   #boardArea { flex: 1; display: flex; flex-direction: column; width: 100%; min-height: 460px; padding: 0 20px 20px; }
   /* The board fills the window until you drag its edges; then it keeps the size you gave it. */
-  #boardBox { position: relative; flex: 1; width: 100%; max-width: 1100px; min-width: 300px; min-height: 260px; margin: 0 auto; }
-  #boardBox.is-sized { flex: none; max-width: none; margin: 0; }
+  #boardBox { position: relative; flex: 1; width: 100%; min-width: 300px; min-height: 260px; margin: 0 auto; }
+  #boardBox.is-sized { flex: none; margin: 0; }
+  #boardBox:fullscreen .grip { display: none; }
   #boardFrame { display: block; width: 100%; height: 100%; border: 0; border-radius: 14px; background: #1c312b; }
   .grip { position: absolute; z-index: 2; touch-action: none; }
   .grip--x { top: 14px; bottom: 14px; right: -9px; width: 14px; cursor: ew-resize; }
@@ -51,7 +52,7 @@
   .grip--xy::after { content: ""; position: absolute; right: 6px; bottom: 6px; width: 12px; height: 12px; border-right: 3px solid rgba(237, 241, 231, 0.55); border-bottom: 3px solid rgba(237, 241, 231, 0.55); border-radius: 0 0 4px 0; }
   .grip:hover::after { background-color: rgba(237, 241, 231, 0.7); }
   .grip--xy:hover::after { background: none; border-color: rgba(237, 241, 231, 0.9); }
-  .sizeHelp { margin: 10px auto 0; max-width: 1100px; width: 100%; font-size: 14px; }
+  .sizeHelp { margin: 10px auto 0; width: 100%; font-size: 14px; }
   #boardBox.is-sized + .sizeHelp { margin-left: 0; }
   .sizeHelp button { height: auto; padding: 0; border: 0; background: none; color: var(--accent); font: inherit; font-weight: 600; text-decoration: underline; cursor: pointer; }
   #boardAway { margin: 8px 0; padding: 16px 18px; border-radius: 14px; background: rgba(0, 0, 0, 0.25); }
@@ -398,6 +399,7 @@
         <div class="board-head__tools">
           <button type="button" class="chalk-btn" id="smaller" aria-label="Smaller writing">A−</button>
           <button type="button" class="chalk-btn" id="bigger" aria-label="Larger writing">A+</button>
+          <button type="button" class="chalk-btn" id="full" hidden>Full screen</button>
           <button type="button" class="chalk-btn" id="move" hidden></button>
         </div>
       </header>
@@ -472,6 +474,15 @@
     let scale = setScale(Number(store('chalkside-pc:scale')) || 1);
     q('#smaller').addEventListener('click', () => (scale = setScale(scale - 0.1)));
     q('#bigger').addEventListener('click', () => (scale = setScale(scale + 0.1)));
+    // Here on the page, the board can fill the whole screen; Esc brings it back.
+    const full = q('#full');
+    if (!floating && document.fullscreenEnabled) {
+      full.hidden = false;
+      const label = () => (full.textContent = document.fullscreenElement ? 'Leave full screen' : 'Full screen');
+      full.addEventListener('click', () => (document.fullscreenElement ? document.exitFullscreen() : boardBox.requestFullscreen()).catch(() => {}));
+      document.addEventListener('fullscreenchange', label);
+      label();
+    }
     if (floating || 'documentPictureInPicture' in window) {
       move.hidden = false;
       move.textContent = floating ? 'Back to the page' : 'Keep on top';
